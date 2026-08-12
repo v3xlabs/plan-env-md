@@ -27,6 +27,7 @@ fn app(pool: SqlitePool, base_url: config::BaseUrl, secret: config::Secret) -> i
             get(view::view_latest).post(view::unlock),
         )
         .at("/:public_id/:slug/rev/:revision", get(view::view_revision))
+        .at("/:public_id/:slug/share", get(view::share_page))
         .at("/", get(static_files::index))
         .at("/*path", get(static_files::spa))
         .with(Tracing)

@@ -554,11 +554,17 @@ async fn public_view_password_gate_lifecycle() {
     push(&app, &token, "plan", "<h1>rev two</h1>").await;
     let doc_path = format!("/{id}/plan");
 
-    // private: visitor sees 404, owner session sees the document
+    // private: visitor sees 404; the owner sees the document itself with the
+    // overlay (revision menu, Share) appended
     let response = call(&app, Method::GET, &doc_path, None, ANON).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let response = call(&app, Method::GET, &doc_path, None, with_cookie(&cookie)).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let text = response.into_body().into_string().await.unwrap();
+    assert!(text.starts_with("<h1>rev two</h1>"));
+    assert!(text.contains("planenv-overlay"));
+    assert!(text.contains("rev 2 (current)"));
+    assert!(text.contains(">Share</a>"));
 
     // publish behind a password
     let response = call(
@@ -596,7 +602,8 @@ async fn public_view_password_gate_lifecycle() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().get(header::SET_COOKIE).is_none());
 
-    // right password: redirect with access cookie, document serves with sandbox
+    // right password: redirect with access cookie; the document serves with
+    // the sandbox intact and the overlay carries no Share button for visitors
     let response = unlock(&app, &doc_path, "letmein").await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let access = access_cookie_of(&response);
@@ -607,10 +614,12 @@ async fn public_view_password_gate_lifecycle() {
             .headers()
             .get(header::CONTENT_SECURITY_POLICY)
             .unwrap(),
-        "sandbox allow-scripts allow-popups"
+        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox"
     );
     let text = response.into_body().into_string().await.unwrap();
-    assert_eq!(text, "<h1>rev two</h1>");
+    assert!(text.starts_with("<h1>rev two</h1>"));
+    assert!(text.contains("planenv-overlay"));
+    assert!(!text.contains(">Share</a>"));
 
     // the same cookie opens pinned revisions
     let response = call(
@@ -623,7 +632,8 @@ async fn public_view_password_gate_lifecycle() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     let text = response.into_body().into_string().await.unwrap();
-    assert_eq!(text, "<h1>rev one</h1>");
+    assert!(text.starts_with("<h1>rev one</h1>"));
+    assert!(text.contains("rev 1 of 2"));
 
     // rotating the password kills outstanding cookies
     call(
@@ -845,4 +855,55 @@ async fn unlock_attempts_are_rate_limited_per_ip() {
     // even the right password is throttled once the bucket is empty
     let response = attempt("letmein").await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn share_page_is_owner_only() {
+    let app = test_app().await;
+    let response = register(&app, "admin", None).await;
+    let cookie = session_cookie_of(&response);
+    let token = agent_token(&app, &cookie).await;
+    let response = push(&app, &token, "shared-plan", "<p>doc</p>").await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let share_path = format!("/{id}/shared-plan/share");
+
+    // owner sees the share controls
+    let response = call(&app, Method::GET, &share_path, None, with_cookie(&cookie)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let text = response.into_body().into_string().await.unwrap();
+    assert!(text.contains("Publish"));
+    assert!(text.contains("/api/docs/shared-plan/publish"));
+
+    // anonymous callers and password visitors get the not-found treatment
+    let response = call(&app, Method::GET, &share_path, None, ANON).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    call(
+        &app,
+        Method::POST,
+        "/api/docs/shared-plan/publish",
+        Some(json!({ "password": "letmein" })),
+        with_cookie(&cookie),
+    )
+    .await;
+    let response = unlock(&app, &format!("/{id}/shared-plan"), "letmein").await;
+    let access = access_cookie_of(&response);
+    let response = call(&app, Method::GET, &share_path, None, with_cookie(&access)).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // the owner's overlay share button opens the popout, not a page change
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{id}/shared-plan"),
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    let text = response.into_body().into_string().await.unwrap();
+    assert!(text.contains(&share_path));
+    assert!(text.contains("window.open"));
 }
