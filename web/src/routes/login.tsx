@@ -14,8 +14,8 @@ const LoginPage = () => {
 
   const mutation = useMutation(() => ({
     mutationFn: login,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["me"] });
+    onSuccess: (user) => {
+      queryClient.setQueryData(["me"], user);
       void navigate({ to: "/" });
     },
   }));

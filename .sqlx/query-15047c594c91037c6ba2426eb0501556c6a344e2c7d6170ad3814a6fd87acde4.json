@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT html as \"html!: Vec<u8>\" FROM revisions\n               WHERE document_id = ? AND revision = ?",
+  "query": "SELECT html as \"html!: Vec<u8>\" FROM revisions\n                   WHERE document_id = ? ORDER BY revision DESC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,11 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       false
     ]
   },
-  "hash": "c4359ef2b6f9388417a00bf4214f6f6e365b201de85412de529fc5d8d96b9c0c"
+  "hash": "15047c594c91037c6ba2426eb0501556c6a344e2c7d6170ad3814a6fd87acde4"
 }

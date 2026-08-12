@@ -728,6 +728,7 @@
           "published",
           "revision_count",
           "latest_revision",
+          "last_pushed_at",
           "created_at",
           "updated_at",
           "url"
@@ -752,6 +753,10 @@
           "latest_revision": {
             "type": "integer",
             "format": "int64"
+          },
+          "last_pushed_at": {
+            "type": "string",
+            "description": "When the newest revision was pushed; the list sorts by this"
           },
           "created_at": {
             "type": "string"

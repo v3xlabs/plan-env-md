@@ -1,37 +1,31 @@
 @import 'tailwindcss';
 
 :root {
-    --bg: #f2f1ec;
-    --surface: #faf9f6;
-    --ink: #20242a;
-    --muted: #6e6a5f;
-    --line: #d9d5cb;
-    --accent: #196d59;
-    --accent-contrast: #f5faf8;
+    color-scheme: light dark;
 }
 
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #17191c;
-        --surface: #1e2125;
-        --ink: #d7d9d3;
-        --muted: #8f9389;
-        --line: #34383d;
-        --accent: #4cc2a0;
-        --accent-contrast: #10201b;
-    }
-}
-
-@theme inline {
-    --color-bg: var(--bg);
-    --color-surface: var(--surface);
-    --color-ink: var(--ink);
-    --color-muted: var(--muted);
-    --color-line: var(--line);
-    --color-accent: var(--accent);
-    --color-accent-contrast: var(--accent-contrast);
+/* Scalar docs palette: background 1/2, text 1/2, border, accent */
+@theme {
+    --color-bg: light-dark(#ffffff, #0f0f0f);
+    --color-surface: light-dark(#f6f6f6, #1a1a1a);
+    --color-ink: light-dark(#2a2f45, #e7e7e7);
+    --color-muted: light-dark(#757575, #a4a4a4);
+    --color-line: light-dark(#dfdfdf, #2d2d2d);
+    --color-accent: light-dark(#0099ff, #3ea6ff);
+    --color-accent-contrast: light-dark(#ffffff, #0f0f0f);
     --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+    --font-mono:
+        ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+/* the accent is authored in display-p3; sRGB values above are the fallback */
+@supports (color: color(display-p3 1 1 1)) {
+    :root {
+        --color-accent: light-dark(
+            color(display-p3 0 0.6 1),
+            color(display-p3 0.243137 0.65098 1)
+        );
+    }
 }
 
 body {

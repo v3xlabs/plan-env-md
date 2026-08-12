@@ -800,6 +800,8 @@ export interface components {
             revision_count: number;
             /** Format: int64 */
             latest_revision: number;
+            /** @description When the newest revision was pushed; the list sorts by this */
+            last_pushed_at: string;
             created_at: string;
             updated_at: string;
             url: string;

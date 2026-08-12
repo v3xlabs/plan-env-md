@@ -50,7 +50,7 @@ const DocumentsPage = () => {
                       {document.slug}
                     </Link>
                     <p class="truncate text-sm text-muted">
-                      {`${document.title ?? "no title"} - rev ${document.latest_revision} - updated ${document.updated_at}`}
+                      {`${document.title ?? "no title"} - rev ${document.latest_revision} - pushed ${document.last_pushed_at}`}
                     </p>
                   </div>
                   <span

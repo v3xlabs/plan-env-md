@@ -111,6 +111,8 @@ struct DocumentBody {
     published: bool,
     revision_count: i64,
     latest_revision: i64,
+    /// When the newest revision was pushed; the list sorts by this
+    last_pushed_at: String,
     created_at: String,
     updated_at: String,
     url: String,
@@ -319,11 +321,12 @@ impl DocsApi {
                       d.title, d.published as "published!: bool",
                       d.created_at as "created_at!: String", d.updated_at as "updated_at!: String",
                       COUNT(r.id) as "revision_count!: i64",
-                      COALESCE(MAX(r.revision), 0) as "latest_revision!: i64"
+                      COALESCE(MAX(r.revision), 0) as "latest_revision!: i64",
+                      COALESCE(MAX(r.created_at), d.created_at) as "last_pushed_at!: String"
                FROM documents d LEFT JOIN revisions r ON r.document_id = d.id
                WHERE d.owner_id = ?
                GROUP BY d.id
-               ORDER BY d.updated_at DESC"#,
+               ORDER BY COALESCE(MAX(r.created_at), d.created_at) DESC"#,
             auth.user().id
         )
         .fetch_all(pool.0)
@@ -340,6 +343,7 @@ impl DocsApi {
                     published: row.published,
                     revision_count: row.revision_count,
                     latest_revision: row.latest_revision,
+                    last_pushed_at: row.last_pushed_at,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
                 })

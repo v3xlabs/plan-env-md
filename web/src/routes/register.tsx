@@ -15,8 +15,8 @@ const RegisterPage = () => {
 
   const mutation = useMutation(() => ({
     mutationFn: register,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["me"] });
+    onSuccess: (user) => {
+      queryClient.setQueryData(["me"], user);
       void navigate({ to: "/" });
     },
   }));
