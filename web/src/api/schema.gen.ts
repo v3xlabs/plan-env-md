@@ -96,6 +96,13 @@ export interface paths {
                         "text/plain; charset=utf-8": string;
                     };
                 };
+                /** @description Too many attempts from this address; try again later */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;
@@ -137,6 +144,13 @@ export interface paths {
                 };
                 /** @description Unknown username or wrong password */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Too many attempts from this address; try again later */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };

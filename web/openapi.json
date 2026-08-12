@@ -63,6 +63,9 @@
           },
           "409": {
             "description": "Username already taken"
+          },
+          "429": {
+            "description": "Too many attempts from this address; try again later"
           }
         }
       }
@@ -93,6 +96,9 @@
           },
           "401": {
             "description": "Unknown username or wrong password"
+          },
+          "429": {
+            "description": "Too many attempts from this address; try again later"
           }
         }
       }

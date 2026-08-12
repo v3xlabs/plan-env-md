@@ -2,13 +2,14 @@ mod api;
 mod auth;
 mod config;
 mod db;
+mod rate_limit;
 mod static_files;
 #[cfg(test)]
 mod tests;
 mod view;
 
 use poem::listener::TcpListener;
-use poem::middleware::CookieJarManager;
+use poem::middleware::{CookieJarManager, Tracing};
 use poem::{EndpointExt, Route, Server, get};
 use sqlx::SqlitePool;
 
@@ -28,10 +29,12 @@ fn app(pool: SqlitePool, base_url: config::BaseUrl, secret: config::Secret) -> i
         .at("/:public_id/:slug/rev/:revision", get(view::view_revision))
         .at("/", get(static_files::index))
         .at("/*path", get(static_files::spa))
+        .with(Tracing)
         .with(CookieJarManager::new())
         .data(pool)
         .data(base_url)
         .data(secret)
+        .data(rate_limit::RateLimiter::default())
 }
 
 #[tokio::main]

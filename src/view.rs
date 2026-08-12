@@ -3,12 +3,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use hmac::{Hmac, Mac};
 use poem::http::{StatusCode, header};
 use poem::web::cookie::{Cookie, SameSite};
-use poem::web::{Data, Form, Path};
+use poem::web::{Data, Form, Path, RealIp};
 use poem::{Request, Response, handler};
 use sha2::Sha256;
 use sqlx::SqlitePool;
 
 use crate::config::{BaseUrl, Secret};
+use crate::rate_limit::RateLimiter;
 use crate::{auth, static_files};
 
 const DOC_ACCESS_COOKIE: &str = "doc_access";
@@ -56,11 +57,16 @@ pub async fn unlock(
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
     base_url: Data<&BaseUrl>,
+    limiter: Data<&RateLimiter>,
+    real_ip: RealIp,
     Path((public_id, slug)): Path<(String, String)>,
     Form(form): Form<UnlockForm>,
 ) -> Response {
     if !is_public_id_shape(&public_id) {
         return not_found();
+    }
+    if !limiter.0.allow(real_ip.0) {
+        return too_many_requests();
     }
     let Some(doc) = fetch_doc(pool.0, &public_id).await else {
         return not_found();
@@ -253,6 +259,13 @@ fn not_found() -> Response {
         .status(StatusCode::NOT_FOUND)
         .content_type("text/plain; charset=utf-8")
         .body("not found")
+}
+
+fn too_many_requests() -> Response {
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .content_type("text/plain; charset=utf-8")
+        .body("too many attempts from this address; try again later")
 }
 
 fn redirect_canonical(public_id: &str, slug: &str, revision: Option<i64>) -> Response {

@@ -1,5 +1,5 @@
-use poem::web::Data;
 use poem::web::cookie::CookieJar;
+use poem::web::{Data, RealIp};
 use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sqlx::SqlitePool;
@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use crate::api::{internal, is_unique_violation};
 use crate::auth::{self, Auth, SESSION_COOKIE, SessionAuth};
 use crate::config::BaseUrl;
+use crate::rate_limit::RateLimiter;
 
 pub struct AuthApi;
 
@@ -43,6 +44,9 @@ enum RegisterResponse {
     /// Username already taken
     #[oai(status = 409)]
     UsernameTaken,
+    /// Too many attempts from this address; try again later
+    #[oai(status = 429)]
+    TooManyRequests,
 }
 
 #[derive(ApiResponse)]
@@ -52,6 +56,9 @@ enum LoginResponse {
     /// Unknown username or wrong password
     #[oai(status = 401)]
     Unauthorized,
+    /// Too many attempts from this address; try again later
+    #[oai(status = 429)]
+    TooManyRequests,
 }
 
 #[derive(ApiResponse)]
@@ -69,9 +76,14 @@ impl AuthApi {
         &self,
         pool: Data<&SqlitePool>,
         base_url: Data<&BaseUrl>,
+        limiter: Data<&RateLimiter>,
+        real_ip: RealIp,
         cookies: &CookieJar,
         body: Json<RegisterRequest>,
     ) -> poem::Result<RegisterResponse> {
+        if !limiter.0.allow(real_ip.0) {
+            return Ok(RegisterResponse::TooManyRequests);
+        }
         let RegisterRequest {
             username,
             password,
@@ -167,9 +179,14 @@ impl AuthApi {
         &self,
         pool: Data<&SqlitePool>,
         base_url: Data<&BaseUrl>,
+        limiter: Data<&RateLimiter>,
+        real_ip: RealIp,
         cookies: &CookieJar,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
+        if !limiter.0.allow(real_ip.0) {
+            return Ok(LoginResponse::TooManyRequests);
+        }
         let row = sqlx::query!(
             r#"SELECT id as "id!: i64", username as "username!: String",
                       password_hash as "password_hash!: String", is_admin as "is_admin!: bool"

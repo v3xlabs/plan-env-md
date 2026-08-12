@@ -750,3 +750,99 @@ async fn embedded_assets_serve_with_correct_headers() {
         "public, max-age=31536000, immutable"
     );
 }
+
+async fn login_attempt(app: &impl Endpoint, forwarded_for: &str, password: &str) -> Response {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login".parse().unwrap())
+        .header("x-forwarded-for", forwarded_for)
+        .content_type("application/json")
+        .body(json!({ "username": "admin", "password": password }).to_string());
+    app.get_response(request).await
+}
+
+#[tokio::test]
+async fn login_attempts_are_rate_limited_per_ip() {
+    let app = test_app().await;
+    register(&app, "admin", None).await;
+
+    let mut statuses = Vec::new();
+    for _ in 0..12 {
+        statuses.push(
+            login_attempt(&app, "10.9.9.9", "wrong-password")
+                .await
+                .status(),
+        );
+    }
+    assert!(
+        statuses[..10]
+            .iter()
+            .all(|s| *s == StatusCode::UNAUTHORIZED)
+    );
+    assert!(
+        statuses[10..]
+            .iter()
+            .all(|s| *s == StatusCode::TOO_MANY_REQUESTS)
+    );
+
+    // the bucket is per address: another client is unaffected, and a correct
+    // password from the throttled address is still refused
+    let response = login_attempt(&app, "10.9.9.10", "wrong-password").await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = login_attempt(&app, "10.9.9.9", "password123").await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn unlock_attempts_are_rate_limited_per_ip() {
+    let app = test_app().await;
+    let response = register(&app, "admin", None).await;
+    let cookie = session_cookie_of(&response);
+    let token = agent_token(&app, &cookie).await;
+    let response = push(&app, &token, "gated", "<p>doc</p>").await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    call(
+        &app,
+        Method::POST,
+        "/api/docs/gated/publish",
+        Some(json!({ "password": "letmein" })),
+        with_cookie(&cookie),
+    )
+    .await;
+
+    let attempt = |password: &'static str| {
+        let path = format!("/{id}/gated");
+        let app = &app;
+        async move {
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri(path.parse().unwrap())
+                .header("x-forwarded-for", "10.7.7.7")
+                .content_type("application/x-www-form-urlencoded")
+                .body(format!("password={password}"));
+            app.get_response(request).await
+        }
+    };
+
+    let mut statuses = Vec::new();
+    for _ in 0..12 {
+        statuses.push(attempt("wrong").await.status());
+    }
+    assert!(
+        statuses[..10]
+            .iter()
+            .all(|s| *s == StatusCode::UNAUTHORIZED)
+    );
+    assert!(
+        statuses[10..]
+            .iter()
+            .all(|s| *s == StatusCode::TOO_MANY_REQUESTS)
+    );
+
+    // even the right password is throttled once the bucket is empty
+    let response = attempt("letmein").await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}

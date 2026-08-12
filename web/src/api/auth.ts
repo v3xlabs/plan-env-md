@@ -34,6 +34,8 @@ export const login = async (credentials: Credentials): Promise<User> => {
 
   if (response.status === 401) throw new Error("Unknown username or wrong password.");
 
+  if (response.status === 429) throw new Error("Too many attempts. Wait a moment and try again.");
+
   throw new Error(`Login failed (status ${response.status})`);
 };
 
@@ -48,6 +50,8 @@ export const register = async (
   if (response.status === 200) return response.data;
 
   if (response.status === 403) throw new Error("Invite code missing, unknown, or already used.");
+
+  if (response.status === 429) throw new Error("Too many attempts. Wait a moment and try again.");
 
   if (response.status === 409) throw new Error("Username already taken.");
 
