@@ -1,8 +1,7 @@
-.envrc
 .direnv/
+.git/
 .tmp/
 data/
 target/
-node_modules/
 web/dist/
-
+web/node_modules/

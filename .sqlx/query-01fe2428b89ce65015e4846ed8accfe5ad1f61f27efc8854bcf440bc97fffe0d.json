@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT u.id as \"id!: i64\", u.username as \"username!: String\", u.is_admin as \"is_admin!: bool\"\n           FROM api_tokens t JOIN users u ON u.id = t.user_id\n           WHERE t.token_hash = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "username!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_admin!: bool",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "01fe2428b89ce65015e4846ed8accfe5ad1f61f27efc8854bcf440bc97fffe0d"
+}

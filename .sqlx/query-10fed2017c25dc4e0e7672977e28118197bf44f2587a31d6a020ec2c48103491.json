@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT d.public_id as \"public_id!: String\", d.slug as \"slug!: String\",\n                      d.title, d.published as \"published!: bool\",\n                      d.created_at as \"created_at!: String\", d.updated_at as \"updated_at!: String\",\n                      COUNT(r.id) as \"revision_count!: i64\",\n                      COALESCE(MAX(r.revision), 0) as \"latest_revision!: i64\"\n               FROM documents d LEFT JOIN revisions r ON r.document_id = d.id\n               WHERE d.owner_id = ?\n               GROUP BY d.id\n               ORDER BY d.updated_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "public_id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "slug!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "published!: bool",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at!: String",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!: String",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision_count!: i64",
+        "ordinal": 6,
+        "type_info": "Null"
+      },
+      {
+        "name": "latest_revision!: i64",
+        "ordinal": 7,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "10fed2017c25dc4e0e7672977e28118197bf44f2587a31d6a020ec2c48103491"
+}

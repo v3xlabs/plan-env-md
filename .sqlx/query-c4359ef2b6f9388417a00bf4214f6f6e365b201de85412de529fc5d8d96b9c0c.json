@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT html as \"html!: Vec<u8>\" FROM revisions\n               WHERE document_id = ? AND revision = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "html!: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c4359ef2b6f9388417a00bf4214f6f6e365b201de85412de529fc5d8d96b9c0c"
+}

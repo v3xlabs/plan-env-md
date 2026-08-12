@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT revision as \"revision!: i64\", size_bytes as \"size_bytes!: i64\",\n                      created_at as \"created_at!: String\"\n               FROM revisions WHERE document_id = ? ORDER BY revision",
+  "describe": {
+    "columns": [
+      {
+        "name": "revision!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "size_bytes!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fe912a1e080360ee86af561c0110205faffb870e48bf9d8e4ec20c75417a3b8a"
+}

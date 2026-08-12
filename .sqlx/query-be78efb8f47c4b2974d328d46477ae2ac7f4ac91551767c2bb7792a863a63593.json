@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.id as \"id!: i64\", i.code as \"code!: String\",\n                      i.created_at as \"created_at!: String\", i.used_at,\n                      u.username as \"used_by?: String\"\n               FROM invite_codes i LEFT JOIN users u ON u.id = i.used_by\n               ORDER BY i.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "used_at",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "used_by?: String",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "be78efb8f47c4b2974d328d46477ae2ac7f4ac91551767c2bb7792a863a63593"
+}

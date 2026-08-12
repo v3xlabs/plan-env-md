@@ -39,6 +39,7 @@
             rust-analyzer
             bacon
             just
+            sqlx-cli
 
             nodejs_24
             pnpm_11

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: i64\", username as \"username!: String\",\n                      password_hash as \"password_hash!: String\", is_admin as \"is_admin!: bool\"\n               FROM users WHERE username = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "username!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "password_hash!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_admin!: bool",
+        "ordinal": 3,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4cfe46ed2bf891aac3acb5ef482c448e279a894afe0a0b4b9068951260fb09bc"
+}

@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: i64\", owner_id as \"owner_id!: i64\", slug as \"slug!: String\",\n                  published as \"published!: bool\", password_hash\n           FROM documents WHERE public_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "owner_id!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "slug!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "published!: bool",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "password_hash",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "392a6421d0be664eb0132e45c12af5a6699e2dbab47bca41b71ae1786a634212"
+}

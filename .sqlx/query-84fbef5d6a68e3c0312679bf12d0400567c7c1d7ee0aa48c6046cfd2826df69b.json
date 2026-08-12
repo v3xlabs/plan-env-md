@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE documents SET published = 1, password_hash = ?\n               WHERE owner_id = ? AND slug = ?\n               RETURNING public_id as \"public_id!: String\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "public_id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "84fbef5d6a68e3c0312679bf12d0400567c7c1d7ee0aa48c6046cfd2826df69b"
+}

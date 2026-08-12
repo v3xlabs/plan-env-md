@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE documents SET published = 0 WHERE owner_id = ? AND slug = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "55d525eb0173897d0108995bd83eee64d8fb4ac2883e9aed6cecdf1e233529c2"
+}
