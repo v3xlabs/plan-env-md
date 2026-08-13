@@ -14,6 +14,7 @@
         "@tanstack/solid-query": "^5.101.4",
         "@tanstack/solid-router": "^1.170.24",
         "clsx": "^2.1.1",
+        "date-fns": "^4.4.0",
         "openapi-hooks": "^0.1.1",
         "solid-js": "^1.9.14"
     },

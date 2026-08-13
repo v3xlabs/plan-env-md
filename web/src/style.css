@@ -4,28 +4,17 @@
     color-scheme: light dark;
 }
 
-/* Scalar docs palette: background 1/2, text 1/2, border, accent */
 @theme {
-    --color-bg: light-dark(#ffffff, #0f0f0f);
-    --color-surface: light-dark(#f6f6f6, #1a1a1a);
-    --color-ink: light-dark(#2a2f45, #e7e7e7);
-    --color-muted: light-dark(#757575, #a4a4a4);
-    --color-line: light-dark(#dfdfdf, #2d2d2d);
-    --color-accent: light-dark(#0099ff, #3ea6ff);
-    --color-accent-contrast: light-dark(#ffffff, #0f0f0f);
+    --color-bg: light-dark(#ffffff, #111111);
+    --color-surface: light-dark(#f7f7f7, #1b1b1b);
+    --color-ink: light-dark(#171717, #eeeeee);
+    --color-muted: light-dark(#666666, #a3a3a3);
+    --color-line: light-dark(#dddddd, #333333);
+    --color-accent: light-dark(#171717, #eeeeee);
+    --color-accent-contrast: light-dark(#ffffff, #111111);
     --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-mono:
         ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
-}
-
-/* the accent is authored in display-p3; sRGB values above are the fallback */
-@supports (color: color(display-p3 1 1 1)) {
-    :root {
-        --color-accent: light-dark(
-            color(display-p3 0 0.6 1),
-            color(display-p3 0.243137 0.65098 1)
-        );
-    }
 }
 
 body {

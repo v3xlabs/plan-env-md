@@ -51,8 +51,6 @@ const DocumentPage = () => {
               </div>
               <a
                 href={document().url}
-                target="_blank"
-                rel="noreferrer"
                 class="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-contrast hover:opacity-90"
               >
                 Open document
@@ -121,8 +119,6 @@ const DocumentPage = () => {
                             ? document().url
                             : `${document().url}/rev/${revision.revision}`
                         }
-                        target="_blank"
-                        rel="noreferrer"
                         class="text-accent hover:underline"
                       >
                         Open
