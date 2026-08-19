@@ -36,7 +36,39 @@ pub struct DocumentInfo {
     pub url: String,
     pub revisions: Vec<Revision>,
     /// What the latest revision asks, and what the owner answered
-    pub questions: Vec<serde_json::Value>,
+    pub questions: Vec<AnsweredQuestion>,
+}
+
+/// A question as it comes back, carrying the reader's decision or `null`.
+///
+/// The question fields are flattened into the same object by the service, so
+/// they are captured loosely here: this type exists to make `answer` explicit,
+/// not to restate a shape the service already owns.
+#[derive(Deserialize, Serialize)]
+pub struct AnsweredQuestion {
+    pub key: String,
+    pub prompt: String,
+    pub anchor: Option<String>,
+    pub options: Vec<AnsweredOption>,
+    /// `None` until the reader decides.
+    pub answer: Option<Answer>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AnsweredOption {
+    pub value: String,
+    pub label: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Answer {
+    /// Option values the reader picked, or `other` when they wrote their own.
+    pub selected: Vec<String>,
+    /// What they wrote, when `selected` holds `other`.
+    pub other_text: Option<String>,
+    pub notes: Option<String>,
+    pub answered_at: String,
 }
 
 #[derive(Deserialize, Serialize)]

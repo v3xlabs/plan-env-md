@@ -38,9 +38,47 @@ struct PushRequest {
     )]
     tags: Option<Vec<String>>,
     #[schemars(
-        description = "Decisions to ask the reader, answered in the document itself. Each needs key, prompt and at least two options; anchor links a question to an element id in the page. The reader can always write their own answer or add a note, so do not add an option for that."
+        description = "Decisions to ask the reader, answered in the document itself. Omitting leaves the existing set alone; an empty list clears it. The reader can always write their own answer or add a note, so do not add an option for that."
     )]
-    questions: Option<serde_json::Value>,
+    questions: Option<Vec<Question>>,
+}
+
+/// A decision the document asks its reader to make.
+///
+/// Typed rather than free JSON: an untyped field reaches the client as a
+/// schema it cannot fill in, so the whole feature was unreachable through this
+/// tool and had to be pushed with curl instead.
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct Question {
+    #[schemars(
+        description = "Stable across revisions. An answer is keyed by this, so keep it when rewording the prompt."
+    )]
+    key: String,
+    #[schemars(description = "The question itself, as the reader will read it.")]
+    prompt: String,
+    #[schemars(description = "Optional line under the prompt for context the prompt cannot carry.")]
+    detail: Option<String>,
+    #[schemars(
+        description = "An element id in the page. The card is placed after that element, so the question sits with the section it is about."
+    )]
+    anchor: Option<String>,
+    #[schemars(description = "Allow more than one option to be selected. Defaults to false.")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    multiple: bool,
+    #[schemars(description = "At least two, at most twelve.")]
+    options: Vec<QuestionOption>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct QuestionOption {
+    #[schemars(
+        description = "Stable identifier for this choice, reported back as the answer. Lowercase and hyphenated reads best."
+    )]
+    value: String,
+    #[schemars(description = "The choice as the reader sees it. A few words.")]
+    label: String,
+    #[schemars(description = "Optional line under the label, for a tradeoff the label cannot carry.")]
+    detail: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -116,7 +154,7 @@ struct ReadResult {
     /// Questions the document asks and what the reader decided. A sibling of
     /// content, not appended to it, so every view stays a pure projection and
     /// an unanswered question is unambiguously null.
-    questions: Vec<serde_json::Value>,
+    questions: Vec<api::AnsweredQuestion>,
 }
 
 struct PlanServer {
@@ -240,6 +278,8 @@ impl PlanServer {
             meta.insert("tags".to_string(), tags.into());
         }
         if let Some(questions) = request.questions {
+            let questions = serde_json::to_value(questions)
+                .map_err(|error| tool_error(format!("cannot encode the questions: {error}")))?;
             meta.insert("questions".to_string(), questions);
         }
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/solid-router";
+import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import { TbOutlineSettings } from "solid-icons/tb";
 import { createSignal, For, type JSX, Show, Suspense } from "solid-js";
 
@@ -11,6 +11,7 @@ import {
   removeProject,
   setFavicon,
 } from "../api/projects";
+import { Button } from "../components/Button";
 import { DocumentRow } from "../components/DocumentRow";
 import { Modal } from "../components/Modal";
 import { ProjectFavicon } from "../components/ProjectFavicon";
@@ -224,17 +225,15 @@ const ProjectPage = () => {
             </Show>
           </p>
         </div>
-        <Link to="/projects" class="shrink-0 text-sm text-muted hover:text-ink hover:underline">
-          All projects
-        </Link>
-        <button
-          type="button"
+        <Button
+          variant="quiet"
           onClick={() => setSettingsOpen(true)}
           title="Project settings"
-          class="shrink-0 text-lg text-muted hover:text-ink"
+          aria-label="Project settings"
+          class="shrink-0"
         >
-          <TbOutlineSettings aria-label="Project settings" />
-        </button>
+          <TbOutlineSettings class="size-4" aria-hidden="true" />
+        </Button>
       </div>
 
       <Modal title="Project settings" isOpen={isSettingsOpen()} onOpenChange={setSettingsOpen}>

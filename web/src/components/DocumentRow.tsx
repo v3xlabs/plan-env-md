@@ -1,43 +1,11 @@
 import { Link } from "@tanstack/solid-router";
-import { createSignal, For, Show } from "solid-js";
+import { For, Show } from "solid-js";
 
 import type { DocumentSummary } from "../api/documents";
 import { absolute, relative } from "../time";
 import { iconForTag, LockIcon, PublishedIcon } from "./Icon";
 import { ProjectFavicon } from "./ProjectFavicon";
-
-/// The rendered thumbnail, or nothing. A 404 means the worker has not reached
-/// this revision yet, or is switched off entirely, so a failed load is an
-/// expected state rather than an error worth showing.
-const Thumbnail = (properties: { slug: string; }) => {
-  const [isMissing, setMissing] = createSignal(false);
-  const preview = (scheme?: "dark") => {
-    const path = `/api/docs/${encodeURIComponent(properties.slug)}/preview`;
-
-    return scheme === undefined ? path : `${path}?scheme=${scheme}`;
-  };
-
-  return (
-    <Show when={!isMissing()}>
-      <a href={preview()} class="hidden shrink-0 sm:block">
-        {/* Both schemes are rendered per revision, so a reader in dark mode
-            sees the document as they would open it. */}
-        <picture class="contents">
-          <source media="(prefers-color-scheme: dark)" srcset={preview("dark")} />
-          <img
-            src={preview()}
-            alt=""
-            width="96"
-            height="60"
-            loading="lazy"
-            class="h-15 w-24 rounded border border-line bg-surface object-cover object-top"
-            onError={() => setMissing(true)}
-          />
-        </picture>
-      </a>
-    </Show>
-  );
-};
+import { Thumbnail } from "./Thumbnail";
 
 type Properties = {
   document: DocumentSummary;
@@ -61,7 +29,11 @@ export const DocumentRow = (properties: Properties) => {
         </For>
       </div>
 
-      <Thumbnail slug={document().slug} />
+      <Thumbnail
+        slug={document().slug}
+        href={document().url}
+        class="hidden h-15 w-24 sm:block"
+      />
 
       <div class="min-w-0 flex-1">
         <Link

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT f.content as \"content: Vec<u8>\", f.object_key as \"object_key: String\",\n                  f.content_type as \"content_type!: String\"\n           FROM revision_files f\n           JOIN revisions r ON r.id = f.revision_id\n           WHERE r.document_id = ? AND f.path = ?\n             AND r.revision = COALESCE(?, (SELECT MAX(revision) FROM revisions\n                                           WHERE document_id = ?))",
+  "describe": {
+    "columns": [
+      {
+        "name": "content: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "object_key: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_type!: String",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "e4104ec7e0cb8b7028aabf41f720151124e9d861a07af464f085627d4db7072a"
+}

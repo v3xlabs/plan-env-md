@@ -1927,3 +1927,170 @@ async fn deleting_a_project_takes_its_aliases_with_it() {
     .await;
     assert_eq!(json_body(detail).await["project"], json!("openlv"));
 }
+
+/// The public asset route must resolve a body out of the bucket like every
+/// other read path. It is the route a published document's images come from,
+/// and its failure mode is a plan that renders without them.
+#[tokio::test]
+async fn a_public_asset_serves_from_the_bucket() {
+    let blobs = crate::blobs::Blobs::in_memory();
+    let (app, pool, _) = test_app_with_blobs(Some(blobs.clone())).await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    push_files(
+        &app,
+        &token,
+        "shot",
+        &[("index.html", "<h1>entry</h1>"), ("style.css", "h1{color:red}")],
+    )
+    .await;
+    let detail = call(&app, Method::GET, "/api/docs/shot", None, with_bearer(&token)).await;
+    let id = json_body(detail).await["id"].as_str().unwrap().to_string();
+
+    // push a second revision so the first goes cold, then sweep it out
+    push_files(&app, &token, "shot", &[("index.html", "<h1>entry</h1>")]).await;
+    crate::demote::sweep_all(&pool, Some(&blobs))
+        .await
+        .expect("the sweep runs");
+    let inline: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM revision_files WHERE path = 'style.css' AND content IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(inline, 0, "the asset should have moved to the bucket");
+
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{id}/shot/rev/1/style.css"),
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.into_body().into_string().await.unwrap(),
+        "h1{color:red}"
+    );
+}
+
+/// A document that brought its own icon keeps it, and one that did not gets the
+/// project's. The project icon is appended, so without the check it would win
+/// over the document's own by being last.
+#[tokio::test]
+async fn a_documents_own_icon_wins_over_the_projects() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    // a 1x1 gif is the smallest thing sniff_image accepts
+    let gif: Vec<u8> = vec![
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+    ];
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/projects/proj/favicon?scheme=light".parse().unwrap())
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .content_type("application/octet-stream")
+        .body(gif);
+    assert_eq!(app.get_response(request).await.status(), StatusCode::NO_CONTENT);
+
+    let bare = push_with_meta(
+        &app,
+        &token,
+        "bare",
+        "<h1>no icon here</h1>",
+        json!({ "project": "proj" }),
+    )
+    .await;
+    let bare_id = json_body(bare).await["id"].as_str().unwrap().to_string();
+
+    let owned = push_with_meta(
+        &app,
+        &token,
+        "owned",
+        r#"<head><link rel="icon" href="mine.png"></head><h1>mine</h1>"#,
+        json!({ "project": "proj" }),
+    )
+    .await;
+    let owned_id = json_body(owned).await["id"].as_str().unwrap().to_string();
+
+    let read = |path: String| {
+        let app = &app;
+        let cookie = cookie.clone();
+        async move {
+            call(app, Method::GET, &path, None, with_cookie(&cookie))
+                .await
+                .into_body()
+                .into_string()
+                .await
+                .unwrap()
+        }
+    };
+
+    let bare_html = read(format!("/{bare_id}/bare/")).await;
+    assert!(
+        bare_html.contains("data:image/gif;base64,"),
+        "a document with no icon takes the project's: {bare_html}"
+    );
+
+    let owned_html = read(format!("/{owned_id}/owned/")).await;
+    assert!(
+        !owned_html.contains("data:image/gif;base64,"),
+        "a document with its own icon keeps it: {owned_html}"
+    );
+    assert!(owned_html.contains(r#"href="mine.png""#));
+}
+
+/// The gate is where a stranger following a shared link lands, so it carries
+/// the project icon too.
+#[tokio::test]
+async fn the_password_gate_carries_the_project_icon() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let gif: Vec<u8> = vec![
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+    ];
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/projects/proj/favicon?scheme=light".parse().unwrap())
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .content_type("application/octet-stream")
+        .body(gif);
+    app.get_response(request).await;
+
+    let pushed = push_with_meta(
+        &app,
+        &token,
+        "gated-icon",
+        "<h1>secret</h1>",
+        json!({ "project": "proj" }),
+    )
+    .await;
+    let id = json_body(pushed).await["id"].as_str().unwrap().to_string();
+    call(
+        &app,
+        Method::POST,
+        "/api/docs/gated-icon/publish",
+        Some(json!({ "password": "letmein" })),
+        with_cookie(&cookie),
+    )
+    .await;
+
+    // no session and no cookie: the stranger's view of the gate
+    let gate = call(&app, Method::GET, &format!("/{id}/gated-icon/"), None, ANON).await;
+    assert_eq!(gate.status(), StatusCode::UNAUTHORIZED);
+    let html = gate.into_body().into_string().await.unwrap();
+    assert!(
+        html.contains("data:image/gif;base64,"),
+        "the gate should carry the project icon: {html}"
+    );
+}

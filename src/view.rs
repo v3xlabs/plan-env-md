@@ -173,7 +173,8 @@ async fn serve_asset(
     }
 
     let row = sqlx::query!(
-        r#"SELECT f.content as "content!: Vec<u8>", f.content_type as "content_type!: String"
+        r#"SELECT f.content as "content: Vec<u8>", f.object_key as "object_key: String",
+                  f.content_type as "content_type!: String"
            FROM revision_files f
            JOIN revisions r ON r.id = f.revision_id
            WHERE r.document_id = ? AND f.path = ?
@@ -192,6 +193,18 @@ async fn serve_asset(
     let Some(row) = row else {
         return not_found();
     };
+    // the row exists, so a body that will not load is a fault on our side. It
+    // must not answer 404: that is the reply for a document the caller may not
+    // see, and reusing it here would hide a broken asset as a missing one
+    let content = match crate::blobs::resolve(blobs, row.content, row.object_key).await {
+        Ok(content) => content,
+        Err(error) => {
+            tracing::warn!(document = doc.id, path, %error, "cannot read a document asset");
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .finish();
+        }
+    };
     // a pinned revision never changes; the latest pointer does
     let cache = if revision.is_some() {
         "private, max-age=31536000, immutable"
@@ -204,7 +217,7 @@ async fn serve_asset(
         .header(header::CONTENT_SECURITY_POLICY, "sandbox")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .header(header::REFERRER_POLICY, "no-referrer")
-        .body(row.content)
+        .body(content)
 }
 
 #[derive(serde::Deserialize)]
@@ -278,7 +291,7 @@ async fn do_unlock(
     }
 
     if !auth::verify_password(form.password, password_hash.clone()).await {
-        return password_form(&public_id, &slug, true);
+        return password_form(&public_id, &slug, true, &doc_icon(pool, &doc).await);
     }
 
     let expiry = unix_now() + (ACCESS_DAYS * 24 * 3600) as i64;
@@ -328,7 +341,7 @@ async fn serve(
         return document_page(pool, secret, blobs, &doc, public_id, revision, owner).await;
     }
     if doc.published {
-        return password_form(public_id, slug, false);
+        return password_form(public_id, slug, false, &doc_icon(pool, &doc).await);
     }
     // a private document must be indistinguishable from a missing one
     not_found()
@@ -480,7 +493,13 @@ async fn document_page(
     // document belongs to. Appended rather than merged into <head>: the parser
     // honours a link element wherever it appears, and the alternative is
     // rewriting agent HTML.
-    if let Some(project) = &doc.project {
+    //
+    // Appending also means the project icon would win over one the document
+    // declared itself, since browsers take the last matching link. A document
+    // that brought its own icon meant it, so it keeps it.
+    if let Some(project) = &doc.project
+        && !declares_icon(&body)
+    {
         body.extend_from_slice(
             favicon_fragment(pool, doc.owner_id, project)
                 .await
@@ -619,6 +638,35 @@ fn overlay_fragment(
 </style>
 "#
     )
+}
+
+/// The project's icon links for a document, or nothing when it has no project
+/// or that project has no icon.
+async fn doc_icon(pool: &SqlitePool, doc: &Doc) -> String {
+    match &doc.project {
+        Some(project) => favicon_fragment(pool, doc.owner_id, project).await,
+        None => String::new(),
+    }
+}
+
+/// Whether the document already asks for a tab icon of its own.
+///
+/// A scan of the bytes rather than a parse, because the alternative is parsing
+/// agent HTML to answer one question. Both ways of being wrong are cheap: a
+/// missed declaration appends the project icon over the document's own, and a
+/// spurious one leaves the tab on the browser default.
+fn declares_icon(body: &[u8]) -> bool {
+    let lowered = String::from_utf8_lossy(body).to_ascii_lowercase();
+    lowered
+        .match_indices("rel=")
+        .any(|(at, _)| lowered[at..].split('"').nth(1).is_some_and(is_icon_rel))
+}
+
+/// `rel` is a space separated set, and the icon keywords may sit anywhere in
+/// it, so `rel="shortcut icon"` and `rel="apple-touch-icon"` both count.
+fn is_icon_rel(rel: &str) -> bool {
+    rel.split_whitespace()
+        .any(|word| word == "icon" || word == "shortcut" || word.ends_with("-icon"))
 }
 
 /// The project favicon as a data URI, so it works for a link and password
@@ -866,9 +914,13 @@ behind one password that covers every revision, including future ones.
 Rotating the password locks out everyone who has the old one.</p>
 <form id="publish-form">
   <label for="password">Document password</label>
-  <input id="password" type="password" required minlength="1" autocomplete="new-password">
+  <div class="url">
+    <input id="password" type="text" required minlength="1" autocomplete="off" spellcheck="false">
+    <button id="generate" type="button" class="quiet">Generate</button>
+  </div>
   <div class="actions">
     <button type="submit">{publish_label}</button>
+    <button id="one-step" type="button" class="quiet">Generate and copy link</button>
     {unpublish_button}
   </div>
 </form>
@@ -879,23 +931,76 @@ Rotating the password locks out everyone who has the old one.</p>
     status.textContent = message;
     status.className = isError ? "error" : "";
   }};
+  const field = document.querySelector("#password");
+
+  // the same alphabet and length as the dashboard's share dialog, so a
+  // password does not tell you which surface produced it. No look-alike
+  // characters, since these get read aloud and retyped
+  const ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const LENGTH = 20;
+  const generate = () => {{
+    // bytes at or above the last whole multiple of the alphabet would make the
+    // first few characters likelier than the rest, so they are drawn again
+    const ceiling = 256 - (256 % ALPHABET.length);
+    const out = [];
+    while (out.length < LENGTH) {{
+      for (const byte of crypto.getRandomValues(new Uint8Array(LENGTH))) {{
+        if (byte < ceiling && out.length < LENGTH) out.push(ALPHABET[byte % ALPHABET.length]);
+      }}
+    }}
+    return out.join("");
+  }};
+
+  // the gate reads the password out of the fragment, which never reaches the
+  // server and so stays out of the request log
+  const linkWithPassword = (password) =>
+    document.querySelector("#url").value + "#k=" + encodeURIComponent(password);
+
+  const publish = (password) =>
+    fetch("/api/docs/{slug}/publish", {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify({{ password: password }}),
+    }});
 
   document.querySelector("#copy").addEventListener("click", () => {{
     navigator.clipboard.writeText(document.querySelector("#url").value)
-      .then(() => say("Link copied.", false));
+      .then(() => say("Link copied, without the password.", false));
+  }});
+
+  document.querySelector("#generate").addEventListener("click", () => {{
+    field.value = generate();
+    field.focus();
+    say("Generated. Publish to put it in force.", false);
+  }});
+
+  // the page renders its state on the server, so a publish reloads rather than
+  // patching the state line, the button label and the unpublish button by hand.
+  // The fragment survives the reload and is what reports the copy afterwards.
+  const publishThenCopy = (password) =>
+    publish(password).then((response) => {{
+      if (!response.ok) return say("Publishing failed (status " + response.status + ").", true);
+      return navigator.clipboard.writeText(linkWithPassword(password)).then(() => {{
+        location.hash = "copied";
+        location.reload();
+      }});
+    }});
+
+  document.querySelector("#one-step").addEventListener("click", () => {{
+    const password = generate();
+    field.value = password;
+    publishThenCopy(password);
   }});
 
   document.querySelector("#publish-form").addEventListener("submit", (event) => {{
     event.preventDefault();
-    fetch("/api/docs/{slug}/publish", {{
-      method: "POST",
-      headers: {{ "Content-Type": "application/json" }},
-      body: JSON.stringify({{ password: document.querySelector("#password").value }}),
-    }}).then((response) => {{
-      if (response.ok) location.reload();
-      else say("Publishing failed (status " + response.status + ").", true);
-    }});
+    publishThenCopy(field.value);
   }});
+
+  if (location.hash === "#copied") {{
+    history.replaceState(null, "", location.pathname);
+    say("Link with password copied. Send it as one piece.", false);
+  }}
 
   const unpublish = document.querySelector("#unpublish");
   if (unpublish) unpublish.addEventListener("click", () => {{
@@ -1016,7 +1121,20 @@ fn redirect_canonical(public_id: &str, slug: &str, revision: Option<i64>) -> Res
 
 // deliberately not part of the SPA: works without JavaScript and never loads
 // app code for visitors
-fn password_form(public_id: &str, slug: &str, wrong_password: bool) -> Response {
+/// The gate, which also accepts the password from the URL fragment so a share
+/// link can carry it.
+///
+/// The fragment and not a query parameter: a fragment is never sent to the
+/// server, so the password stays out of the access log and out of any
+/// `Referer` a document's own subresources might send. It is cleared from the
+/// address bar before the form is submitted, so it does not linger there or in
+/// the back stack. With scripting off the reader simply types the password,
+/// which is the behaviour this page had before.
+///
+/// `icon` carries the project's tab icon, already rendered as link elements.
+/// This page is where a stranger following a shared link lands, so it is the
+/// one place the icon says whose document they are about to open.
+fn password_form(public_id: &str, slug: &str, wrong_password: bool, icon: &str) -> Response {
     let error = if wrong_password {
         r#"<p class="error">Wrong password.</p>"#
     } else {
@@ -1028,6 +1146,7 @@ fn password_form(public_id: &str, slug: &str, wrong_password: bool) -> Response 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{icon}
 <title>{slug}</title>
 <style>
   body {{ font: 16px/1.6 system-ui, sans-serif; display: grid; place-items: center;
@@ -1051,6 +1170,18 @@ fn password_form(public_id: &str, slug: &str, wrong_password: bool) -> Response 
   <input type="password" name="password" placeholder="document password" autofocus required>
   <button type="submit">Open document</button>
 </form>
+<script>
+(function () {{
+  var key = new URLSearchParams(location.hash.slice(1)).get('k');
+  if (!key) return;
+  var form = document.forms[0];
+  form.password.value = key;
+  // drop it from the address bar before navigating, so a shared screen or a
+  // glance at the history does not hand the password over
+  history.replaceState(null, '', location.pathname + location.search);
+  form.submit();
+}})();
+</script>
 </body>
 </html>
 "#
