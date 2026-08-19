@@ -31,6 +31,16 @@ export const addAlias = async (input: { project: string; alias: string; }): Prom
   throw new Error(`Could not add the alias (status ${response.status})`);
 };
 
+export const removeProject = async (project: string): Promise<void> => {
+  const response = await api("/api/projects/{project}", "delete", { path: { project } });
+
+  if (response.status === 204) return;
+
+  if (response.status === 409) throw new Error(response.data);
+
+  throw new Error(`Could not remove the project (status ${response.status})`);
+};
+
 export const removeAlias = async (input: { project: string; alias: string; }): Promise<void> => {
   const response = await api("/api/projects/{project}/aliases/{alias}", "delete", {
     path: { project: input.project, alias: input.alias },

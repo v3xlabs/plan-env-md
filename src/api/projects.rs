@@ -45,6 +45,18 @@ enum AliasResponse {
 }
 
 #[derive(ApiResponse)]
+enum DeleteResponse {
+    #[oai(status = 204)]
+    Done,
+    /// The project still holds documents, which would be left unfiled
+    #[oai(status = 409)]
+    NotEmpty(PlainText<String>),
+    /// No project of this name on this account
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
 enum FaviconResponse {
     #[oai(status = 200)]
     Ok(
@@ -183,6 +195,64 @@ impl ProjectsApi {
         tx.commit().await.map_err(internal)?;
 
         Ok(AliasResponse::Done)
+    }
+
+    /// Remove an empty project, along with its aliases and icons.
+    ///
+    /// Named exactly, never through an alias: deleting `openlv` should not take
+    /// `open-lavatory` with it. A project holding documents is refused rather
+    /// than emptied, because unfiling a pile of documents is not something a
+    /// delete button should do quietly.
+    #[oai(path = "/projects/:project", method = "delete")]
+    async fn delete(
+        &self,
+        pool: Data<&SqlitePool>,
+        auth: Auth,
+        project: Path<String>,
+    ) -> poem::Result<DeleteResponse> {
+        let documents = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM documents
+               WHERE owner_id = ? AND project = ?"#,
+            auth.user().id,
+            project.0
+        )
+        .fetch_one(pool.0)
+        .await
+        .map_err(internal)?;
+        if documents > 0 {
+            return Ok(DeleteResponse::NotEmpty(PlainText(format!(
+                "{} still holds {documents} document{}; move them elsewhere first",
+                project.0,
+                if documents == 1 { "" } else { "s" }
+            ))));
+        }
+
+        let mut tx = pool.0.begin().await.map_err(internal)?;
+        // the aliases go first: one left behind would resolve a push to a
+        // project that no longer exists
+        sqlx::query!(
+            "DELETE FROM project_aliases WHERE owner_id = ? AND project = ?",
+            auth.user().id,
+            project.0
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        let deleted = sqlx::query!(
+            "DELETE FROM projects WHERE owner_id = ? AND slug = ?",
+            auth.user().id,
+            project.0
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if deleted == 0 {
+            return Ok(DeleteResponse::NotFound);
+        }
+        tx.commit().await.map_err(internal)?;
+
+        Ok(DeleteResponse::Done)
     }
 
     /// Stop resolving this name. Documents already in the project stay put.

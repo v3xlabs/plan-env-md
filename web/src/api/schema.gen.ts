@@ -588,6 +588,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an empty project, along with its aliases and icons.
+         * @description Named exactly, never through an alias: deleting `openlv` should not take
+         *     `open-lavatory` with it. A project holding documents is refused rather
+         *     than emptied, because unfiling a pile of documents is not something a
+         *     delete button should do quietly.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No project of this name on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The project still holds documents, which would be left unfiled */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project}/favicon": {
         parameters: {
             query?: never;

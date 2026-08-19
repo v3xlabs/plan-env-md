@@ -470,6 +470,50 @@
         ]
       }
     },
+    "/api/projects/{project}": {
+      "delete": {
+        "summary": "Remove an empty project, along with its aliases and icons.",
+        "description": "Named exactly, never through an alias: deleting `openlv` should not take\n`open-lavatory` with it. A project holding documents is refused rather\nthan emptied, because unfiling a pile of documents is not something a\ndelete button should do quietly.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "409": {
+            "description": "The project still holds documents, which would be left unfiled",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project of this name on this account"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/projects/{project}/favicon": {
       "get": {
         "summary": "A project's favicon. Owner only, like everything else about a document.",

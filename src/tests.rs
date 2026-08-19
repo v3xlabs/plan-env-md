@@ -1810,3 +1810,120 @@ async fn the_sweep_demotes_superseded_revisions_only() {
         "a superseded revision must read back out of the bucket"
     );
 }
+
+/// Deleting is for tidying up an empty project. A project that still holds
+/// documents is refused, because emptying it would leave them unfiled.
+#[tokio::test]
+async fn a_project_is_deletable_only_once_it_is_empty() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    push_with_meta(
+        &app,
+        &token,
+        "plan",
+        "<h1>plan</h1>",
+        json!({ "project": "temporary" }),
+    )
+    .await;
+
+    let response = call(
+        &app,
+        Method::DELETE,
+        "/api/projects/temporary",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    // move the document out, which is what leaves the empty project behind
+    let response = call(
+        &app,
+        Method::PATCH,
+        "/api/docs/plan",
+        Some(json!({ "project": "permanent" })),
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = call(
+        &app,
+        Method::DELETE,
+        "/api/projects/temporary",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let projects = call(&app, Method::GET, "/api/projects", None, with_bearer(&token)).await;
+    let names: Vec<String> = json_body(projects)
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["slug"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, vec!["permanent".to_string()]);
+
+    let response = call(
+        &app,
+        Method::DELETE,
+        "/api/projects/temporary",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// An alias must not outlive its project, or a later push naming it would file
+/// a document into something that no longer exists.
+#[tokio::test]
+async fn deleting_a_project_takes_its_aliases_with_it() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = call(
+        &app,
+        Method::PUT,
+        "/api/projects/open-lavatory/aliases/openlv",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let response = call(
+        &app,
+        Method::DELETE,
+        "/api/projects/open-lavatory",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // pushing to the old alias must start a fresh project, not resurrect one
+    push_with_meta(
+        &app,
+        &token,
+        "plan",
+        "<h1>plan</h1>",
+        json!({ "project": "openlv" }),
+    )
+    .await;
+    let detail = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(json_body(detail).await["project"], json!("openlv"));
+}
