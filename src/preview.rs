@@ -57,6 +57,14 @@ async fn run(pool: SqlitePool, port: u16, chromium: String) -> Result<(), String
         // containers give /dev/shm 64MB by default, which Chromium outgrows
         .arg("--disable-dev-shm-usage")
         .arg("--hide-scrollbars")
+        // this browser only ever loads one local page, so everything it would
+        // normally keep warm for a human is memory the pod does not have
+        .arg("--disable-background-networking")
+        .arg("--disable-extensions")
+        .arg("--disable-default-apps")
+        .arg("--disable-sync")
+        .arg("--no-first-run")
+        .arg("--mute-audio")
         .viewport(Some(WindowViewport {
             width: WIDTH,
             height: HEIGHT,
@@ -105,11 +113,25 @@ async fn render(
     revision_id: i64,
     scheme: &str,
 ) -> Result<Vec<u8>, String> {
-    let url = format!("http://127.0.0.1:{port}/_render/{revision_id}/");
     let page = browser
         .new_page("about:blank")
         .await
         .map_err(|e| e.to_string())?;
+
+    // every early return below would otherwise leave the tab open, and one
+    // leaked tab per failed job is what turns a broken render into an OOM kill
+    let shot = capture(&page, port, revision_id, scheme).await;
+    let _ = page.clone().close().await;
+    shot
+}
+
+async fn capture(
+    page: &chromiumoxide::Page,
+    port: u16,
+    revision_id: i64,
+    scheme: &str,
+) -> Result<Vec<u8>, String> {
+    let url = format!("http://127.0.0.1:{port}/_render/{revision_id}/");
 
     let media: SetEmulatedMediaParams = SetEmulatedMediaParamsBuilder::default()
         .media("screen")
@@ -130,26 +152,22 @@ async fn render(
 
     // the viewport, not the full page: a full capture of a long plan is a tall
     // sliver that reads as noise at thumbnail size
-    let shot = page
-        .screenshot(
-            CaptureScreenshotParams::builder()
-                .format(CaptureScreenshotFormat::Webp)
-                .quality(75)
-                .clip(Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: f64::from(WIDTH),
-                    height: f64::from(HEIGHT),
-                    scale: SCALE,
-                })
-                .capture_beyond_viewport(true)
-                .build(),
-        )
-        .await
-        .map_err(|e| e.to_string());
-
-    let _ = page.close().await;
-    shot
+    page.screenshot(
+        CaptureScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Webp)
+            .quality(75)
+            .clip(Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(WIDTH),
+                height: f64::from(HEIGHT),
+                scale: SCALE,
+            })
+            .capture_beyond_viewport(true)
+            .build(),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 async fn finish(pool: &SqlitePool, job: &Job, outcome: Result<Vec<u8>, String>) {

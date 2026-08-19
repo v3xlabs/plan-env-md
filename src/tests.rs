@@ -1626,3 +1626,70 @@ async fn a_project_listing_is_scoped_and_capped() {
     assert_eq!(body.as_array().unwrap().len(), 2);
     assert_eq!(body[0]["slug"], json!("c"));
 }
+
+/// The preview worker reaches the render route over a real loopback socket, so
+/// covering it needs a real socket: `RequestState` is private to poem, and an
+/// in-process request has no peer address to satisfy the guard with.
+#[tokio::test]
+async fn the_render_route_serves_the_entry_and_its_assets_over_loopback() {
+    use std::io::{Read, Write};
+
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push_files(
+        &app,
+        &token,
+        "shot",
+        &[
+            ("index.html", "<h1>entry</h1>"),
+            ("style.css", "h1{color:red}"),
+        ],
+    )
+    .await;
+
+    use poem::listener::{Acceptor, Listener};
+    let acceptor = poem::listener::TcpListener::bind("127.0.0.1:0")
+        .into_acceptor()
+        .await
+        .expect("bind");
+    let port = acceptor.local_addr()[0]
+        .as_socket_addr()
+        .expect("socket addr")
+        .port();
+    tokio::spawn(async move {
+        let _ = poem::Server::new_with_acceptor(acceptor).run(app).await;
+    });
+
+    let fetch = move |path: String| {
+        std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+            write!(
+                stream,
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            let mut response = String::new();
+            let _ = stream.read_to_string(&mut response);
+            response
+        })
+        .join()
+        .expect("request thread")
+    };
+
+    // the first push is revision 1; an empty remainder must mean the entry
+    // document rather than a file with no name
+    let entry = tokio::task::spawn_blocking(move || fetch("/_render/1/".to_string()))
+        .await
+        .unwrap();
+    assert!(entry.starts_with("HTTP/1.1 200 OK"), "entry: {entry}");
+    assert!(entry.contains("<h1>entry</h1>"), "entry: {entry}");
+    // and it carries no overlay, so a thumbnail shows the document alone
+    assert!(!entry.contains("planenv-overlay"), "entry: {entry}");
+
+    let asset = tokio::task::spawn_blocking(move || fetch("/_render/1/style.css".to_string()))
+        .await
+        .unwrap();
+    assert!(asset.starts_with("HTTP/1.1 200 OK"), "asset: {asset}");
+    assert!(asset.contains("h1{color:red}"), "asset: {asset}");
+}

@@ -650,9 +650,14 @@ pub async fn render_page(
     serve_revision_file(pool.0, revision_id, "index.html").await
 }
 
-/// An asset belonging to the revision being rendered. Same loopback guard: the
-/// page's own subresource requests carry no token, and only a process inside
-/// this container can reach the route at all.
+/// The revision as the preview worker sees it: the entry document at the
+/// directory URL, and its assets beneath. An empty remainder means the entry,
+/// the same rule the public asset route uses.
+///
+/// Guarded by the socket peer address rather than `RealIp`: a caller cannot
+/// make the kernel report a loopback peer, whereas `X-Forwarded-For` is theirs
+/// to write. The ingress connects from a pod address, so only a process inside
+/// this container reaches it.
 #[handler]
 pub async fn render_asset(
     req: &Request,
@@ -662,7 +667,8 @@ pub async fn render_asset(
     if !is_loopback(req) {
         return not_found();
     }
-    serve_revision_file(pool.0, revision_id, &path).await
+    let path = if path.is_empty() { "index.html" } else { &path };
+    serve_revision_file(pool.0, revision_id, path).await
 }
 
 fn is_loopback(req: &Request) -> bool {

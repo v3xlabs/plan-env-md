@@ -35,7 +35,8 @@ fn app(pool: SqlitePool, base_url: config::BaseUrl, secret: config::Secret) -> i
         .at("/:public_id/:slug/rev/:revision/", get(view::view_revision))
         .at("/:public_id/:slug/share", get(view::share_page))
         .at("/_planenv/:name", get(static_files::answer_asset))
-        .at("/_render/:revision_id/", get(view::render_page))
+        // one route, not a bare directory plus a wildcard: poem prefers the
+        // wildcard, so the bare route would be dead and every render would 404
         .at("/_render/:revision_id/*path", get(view::render_asset))
         // registered after the specific routes above, which poem prefers
         .at(
