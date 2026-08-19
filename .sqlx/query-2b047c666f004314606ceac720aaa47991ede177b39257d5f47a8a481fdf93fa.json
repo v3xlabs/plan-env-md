@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT f.content as \"content: Vec<u8>\", f.object_key as \"object_key: String\"\n           FROM revision_files f\n           JOIN revisions r ON r.id = f.revision_id\n           WHERE r.document_id = ? AND r.revision = ? AND f.path = 'index.html'",
+  "describe": {
+    "columns": [
+      {
+        "name": "content: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "object_key: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "2b047c666f004314606ceac720aaa47991ede177b39257d5f47a8a481fdf93fa"
+}

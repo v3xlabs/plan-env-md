@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE revision_previews SET image = NULL, object_key = ?\n             WHERE revision_id = ? AND scheme = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5af78f2ecf3601463d8d735c72d851e883e2b7d4b781bcc456fae7595f1e0711"
+}

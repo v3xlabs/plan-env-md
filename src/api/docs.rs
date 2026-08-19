@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 use crate::answer_key;
 use crate::api::question::{self, Answer, AnsweredQuestion, Question};
 use crate::api::upload::{self, ENTRY_PATH, MAX_ENTRY_BYTES, UploadedFile};
-use crate::api::{internal, is_unique_violation};
+use crate::api::{blob_failed, internal, is_unique_violation};
 use crate::auth::{self, Auth, AuthUser, SessionAuth};
 use crate::config::{BaseUrl, Secret};
 
@@ -352,6 +352,15 @@ enum PreviewImageResponse {
 }
 
 #[derive(ApiResponse)]
+enum RefreshPreviewResponse {
+    #[oai(status = 202)]
+    Queued,
+    /// No document with this slug on this account, or it has no revisions
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
 enum QuestionsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<AnsweredQuestion>>),
@@ -429,10 +438,12 @@ impl DocsApi {
     /// mints its public id; every later push appends a revision at the same
     /// URL.
     #[oai(path = "/docs/:slug", method = "put")]
+    #[allow(clippy::too_many_arguments)]
     async fn push(
         &self,
         pool: Data<&SqlitePool>,
         base_url: Data<&BaseUrl>,
+        blobs: Data<&Option<crate::blobs::Blobs>>,
         auth: Auth,
         slug: Path<String>,
         title: Query<Option<String>>,
@@ -550,12 +561,24 @@ impl DocsApi {
 
         for file in &body.files {
             let file_size = file.content.len() as i64;
+            // the object is stored before the row records it, so a transaction
+            // that never commits leaves an orphan object rather than a row
+            // pointing at bytes that were never written
+            let object_key = match blobs.0 {
+                Some(blobs) if file_size > crate::blobs::INLINE_LIMIT => {
+                    Some(blobs.put(&file.content).await.map_err(blob_failed)?)
+                }
+                _ => None,
+            };
+            let content = object_key.is_none().then_some(&file.content);
             sqlx::query!(
-                "INSERT INTO revision_files (revision_id, path, content, content_type, size_bytes)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO revision_files
+                     (revision_id, path, content, object_key, content_type, size_bytes)
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 inserted.id,
                 file.path,
-                file.content,
+                content,
+                object_key,
                 file.content_type,
                 file_size
             )
@@ -775,11 +798,12 @@ impl DocsApi {
     async fn raw_latest(
         &self,
         pool: Data<&SqlitePool>,
+        blobs: Data<&Option<crate::blobs::Blobs>>,
         auth: Auth,
         slug: Path<String>,
     ) -> poem::Result<RawResponse> {
-        let html = sqlx::query_scalar!(
-            r#"SELECT f.content as "html!: Vec<u8>"
+        let row = sqlx::query!(
+            r#"SELECT f.content as "content: Vec<u8>", f.object_key as "object_key: String"
                FROM revision_files f
                JOIN revisions r ON r.id = f.revision_id
                JOIN documents d ON d.id = r.document_id
@@ -792,8 +816,12 @@ impl DocsApi {
         .await
         .map_err(internal)?;
 
-        Ok(match html {
-            Some(html) => raw_ok(html),
+        Ok(match row {
+            Some(row) => raw_ok(
+                crate::blobs::resolve(blobs.0.as_ref(), row.content, row.object_key)
+                    .await
+                    .map_err(blob_failed)?,
+            ),
             None => RawResponse::NotFound,
         })
     }
@@ -803,12 +831,13 @@ impl DocsApi {
     async fn raw_revision(
         &self,
         pool: Data<&SqlitePool>,
+        blobs: Data<&Option<crate::blobs::Blobs>>,
         auth: Auth,
         slug: Path<String>,
         revision: Path<i64>,
     ) -> poem::Result<RawResponse> {
-        let html = sqlx::query_scalar!(
-            r#"SELECT f.content as "html!: Vec<u8>"
+        let row = sqlx::query!(
+            r#"SELECT f.content as "content: Vec<u8>", f.object_key as "object_key: String"
                FROM revision_files f
                JOIN revisions r ON r.id = f.revision_id
                JOIN documents d ON d.id = r.document_id
@@ -820,6 +849,14 @@ impl DocsApi {
         .fetch_optional(pool.0)
         .await
         .map_err(internal)?;
+        let html = match row {
+            Some(row) => Some(
+                crate::blobs::resolve(blobs.0.as_ref(), row.content, row.object_key)
+                    .await
+                    .map_err(blob_failed)?,
+            ),
+            None => None,
+        };
 
         Ok(match html {
             Some(html) => raw_ok(html),
@@ -870,6 +907,7 @@ impl DocsApi {
     async fn preview(
         &self,
         pool: Data<&SqlitePool>,
+        blobs: Data<&Option<crate::blobs::Blobs>>,
         auth: Auth,
         slug: Path<String>,
         scheme: Query<Option<crate::api::projects::Scheme>>,
@@ -880,7 +918,8 @@ impl DocsApi {
             crate::api::projects::Scheme::Dark => "dark",
         };
         let row = sqlx::query!(
-            r#"SELECT p.image as "image!: Vec<u8>", p.content_type as "content_type!: String"
+            r#"SELECT p.image as "image: Vec<u8>", p.object_key as "object_key: String",
+                      p.content_type as "content_type!: String"
                FROM revision_previews p
                JOIN revisions r ON r.id = p.revision_id
                JOIN documents d ON d.id = r.document_id
@@ -898,12 +937,51 @@ impl DocsApi {
 
         Ok(match row {
             Some(row) => PreviewImageResponse::Ok(
-                poem_openapi::payload::Binary(row.image),
+                poem_openapi::payload::Binary(
+                    crate::blobs::resolve(blobs.0.as_ref(), row.image, row.object_key)
+                        .await
+                        .map_err(blob_failed)?,
+                ),
                 row.content_type,
                 "private, max-age=300".to_string(),
             ),
             None => PreviewImageResponse::NotFound,
         })
+    }
+
+    /// Queue the latest revision's thumbnail to be rendered again.
+    ///
+    /// A stored preview is never revisited on its own, so a thumbnail captured
+    /// by a broken renderer, or before the page's own assets existed, would
+    /// otherwise stay wrong forever.
+    #[oai(path = "/docs/:slug/preview/refresh", method = "post")]
+    async fn refresh_preview(
+        &self,
+        pool: Data<&SqlitePool>,
+        auth: Auth,
+        slug: Path<String>,
+    ) -> poem::Result<RefreshPreviewResponse> {
+        let revision_id = sqlx::query_scalar!(
+            r#"SELECT r.id as "id!: i64" FROM revisions r
+               JOIN documents d ON d.id = r.document_id
+               WHERE d.owner_id = ? AND d.slug = ?
+               ORDER BY r.revision DESC LIMIT 1"#,
+            auth.user().id,
+            slug.0
+        )
+        .fetch_optional(pool.0)
+        .await
+        .map_err(internal)?;
+        let Some(revision_id) = revision_id else {
+            return Ok(RefreshPreviewResponse::NotFound);
+        };
+
+        let mut tx = pool.0.begin().await.map_err(internal)?;
+        crate::preview::enqueue(&mut tx, revision_id)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        Ok(RefreshPreviewResponse::Queued)
     }
 
     /// The latest revision's questions, each with the owner's answer or null.

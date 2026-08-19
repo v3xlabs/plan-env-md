@@ -4,28 +4,36 @@ import { createSignal, For, Show } from "solid-js";
 import type { DocumentSummary } from "../api/documents";
 import { absolute, relative } from "../time";
 import { iconForTag, LockIcon, PublishedIcon } from "./Icon";
+import { ProjectFavicon } from "./ProjectFavicon";
 
 /// The rendered thumbnail, or nothing. A 404 means the worker has not reached
 /// this revision yet, or is switched off entirely, so a failed load is an
 /// expected state rather than an error worth showing.
 const Thumbnail = (properties: { slug: string; }) => {
   const [isMissing, setMissing] = createSignal(false);
+  const preview = (scheme?: "dark") => {
+    const path = `/api/docs/${encodeURIComponent(properties.slug)}/preview`;
+
+    return scheme === undefined ? path : `${path}?scheme=${scheme}`;
+  };
 
   return (
     <Show when={!isMissing()}>
-      <a
-        href={`/api/docs/${encodeURIComponent(properties.slug)}/preview`}
-        class="hidden shrink-0 sm:block"
-      >
-        <img
-          src={`/api/docs/${encodeURIComponent(properties.slug)}/preview`}
-          alt=""
-          width="96"
-          height="60"
-          loading="lazy"
-          class="h-15 w-24 rounded border border-line bg-surface object-cover object-top"
-          onError={() => setMissing(true)}
-        />
+      <a href={preview()} class="hidden shrink-0 sm:block">
+        {/* Both schemes are rendered per revision, so a reader in dark mode
+            sees the document as they would open it. */}
+        <picture class="contents">
+          <source media="(prefers-color-scheme: dark)" srcset={preview("dark")} />
+          <img
+            src={preview()}
+            alt=""
+            width="96"
+            height="60"
+            loading="lazy"
+            class="h-15 w-24 rounded border border-line bg-surface object-cover object-top"
+            onError={() => setMissing(true)}
+          />
+        </picture>
       </a>
     </Show>
   );
@@ -33,7 +41,7 @@ const Thumbnail = (properties: { slug: string; }) => {
 
 type Properties = {
   document: DocumentSummary;
-  /// A project page already says which project it is, so the chip is noise there
+  /// A project page already says which project it is, so the label is noise there
   showProject?: boolean;
 };
 
@@ -69,8 +77,9 @@ export const DocumentRow = (properties: Properties) => {
               <Link
                 to="/projects/$project"
                 params={{ project: project() }}
-                class="shrink-0 rounded border border-line px-1.5 text-ink hover:border-accent hover:text-accent"
+                class="flex shrink-0 items-center gap-1 text-ink hover:text-accent"
               >
+                <ProjectFavicon project={project()} has class="size-3.5" />
                 {project()}
               </Link>
             )}

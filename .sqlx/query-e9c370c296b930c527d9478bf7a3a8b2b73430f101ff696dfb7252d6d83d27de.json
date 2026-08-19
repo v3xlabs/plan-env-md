@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE revision_files SET content = NULL, object_key = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e9c370c296b930c527d9478bf7a3a8b2b73430f101ff696dfb7252d6d83d27de"
+}

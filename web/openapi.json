@@ -1094,6 +1094,40 @@
         ]
       }
     },
+    "/api/docs/{slug}/preview/refresh": {
+      "post": {
+        "summary": "Queue the latest revision's thumbnail to be rendered again.",
+        "description": "A stored preview is never revisited on its own, so a thumbnail captured\nby a broken renderer, or before the page's own assets existed, would\notherwise stay wrong forever.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "404": {
+            "description": "No document with this slug on this account, or it has no revisions"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/docs/{slug}/questions": {
       "get": {
         "summary": "The latest revision's questions, each with the owner's answer or null.",

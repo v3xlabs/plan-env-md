@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE revision_previews\n                 SET status = 'ready', image = ?, object_key = ?, content_type = 'image/webp',\n                     width = ?, height = ?, error = NULL, updated_at = datetime('now')\n                 WHERE revision_id = ? AND scheme = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "924d6b4390d06a6bc0efde17b5c2002187b7be5bdc827ae727be49246866526e"
+}

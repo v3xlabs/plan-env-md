@@ -52,6 +52,12 @@ where
     poem::error::InternalServerError(error)
 }
 
+/// Blob storage reports failures as messages rather than as a error type,
+/// because every other caller logs them rather than matching on them.
+pub fn blob_failed(error: String) -> poem::Error {
+    poem::error::InternalServerError(std::io::Error::other(error))
+}
+
 pub fn is_unique_violation(error: &sqlx::Error) -> bool {
     matches!(error, sqlx::Error::Database(db) if db.is_unique_violation())
 }

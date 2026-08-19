@@ -18,7 +18,7 @@
       "Right": 4
     },
     "nullable": [
-      false,
+      true,
       false
     ]
   },

@@ -48,9 +48,10 @@ pub async fn view_latest(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug)): Path<(String, String)>,
 ) -> Response {
-    serve(req, pool.0, secret.0, &public_id, &slug, None).await
+    serve(req, pool.0, secret.0, blobs.0.as_ref(), &public_id, &slug, None).await
 }
 
 #[handler]
@@ -58,9 +59,19 @@ pub async fn view_revision(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug, revision)): Path<(String, String, i64)>,
 ) -> Response {
-    serve(req, pool.0, secret.0, &public_id, &slug, Some(revision)).await
+    serve(
+        req,
+        pool.0,
+        secret.0,
+        blobs.0.as_ref(),
+        &public_id,
+        &slug,
+        Some(revision),
+    )
+    .await
 }
 
 /// A document is a directory now, so a relative `<script src="chart.js">`
@@ -96,9 +107,20 @@ pub async fn asset_latest(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug, path)): Path<(String, String, String)>,
 ) -> Response {
-    serve_asset(req, pool.0, secret.0, &public_id, &slug, None, &path).await
+    serve_asset(
+        req,
+        pool.0,
+        secret.0,
+        blobs.0.as_ref(),
+        &public_id,
+        &slug,
+        None,
+        &path,
+    )
+    .await
 }
 
 #[handler]
@@ -106,12 +128,14 @@ pub async fn asset_revision(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug, revision, path)): Path<(String, String, i64, String)>,
 ) -> Response {
     serve_asset(
         req,
         pool.0,
         secret.0,
+        blobs.0.as_ref(),
         &public_id,
         &slug,
         Some(revision),
@@ -125,6 +149,7 @@ async fn serve_asset(
     req: &Request,
     pool: &SqlitePool,
     secret: &Secret,
+    blobs: Option<&crate::blobs::Blobs>,
     public_id: &str,
     slug: &str,
     revision: Option<i64>,
@@ -133,7 +158,7 @@ async fn serve_asset(
     // poem matches the directory URL itself against this wildcard with an empty
     // remainder, so that case is the document rather than a missing asset
     if path.is_empty() {
-        return serve(req, pool, secret, public_id, slug, revision).await;
+        return serve(req, pool, secret, blobs, public_id, slug, revision).await;
     }
     if !is_public_id_shape(public_id) {
         return static_files::serve_or_index(&format!("{public_id}/{slug}/{path}"));
@@ -272,10 +297,12 @@ async fn do_unlock(
         .finish()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn serve(
     req: &Request,
     pool: &SqlitePool,
     secret: &Secret,
+    blobs: Option<&crate::blobs::Blobs>,
     public_id: &str,
     slug: &str,
     revision: Option<i64>,
@@ -298,7 +325,7 @@ async fn serve(
     let authorized = owner || visitor_unlocked(req, secret, &doc);
 
     if authorized {
-        return document_page(pool, secret, &doc, public_id, revision, owner).await;
+        return document_page(pool, secret, blobs, &doc, public_id, revision, owner).await;
     }
     if doc.published {
         return password_form(public_id, slug, false);
@@ -385,9 +412,11 @@ async fn fetch_doc(pool: &SqlitePool, public_id: &str) -> Option<Doc> {
 /// The document HTML served as-is, with the floating viewer overlay appended.
 /// Fragment links, scrolling, and printing behave as in the bare document; the
 /// sandbox CSP keeps the document's own scripts in an opaque origin.
+#[allow(clippy::too_many_arguments)]
 async fn document_page(
     pool: &SqlitePool,
     secret: &Secret,
+    blobs: Option<&crate::blobs::Blobs>,
     doc: &Doc,
     public_id: &str,
     revision: Option<i64>,
@@ -409,8 +438,9 @@ async fn document_page(
         return not_found();
     }
 
-    let html = sqlx::query_scalar!(
-        r#"SELECT f.content as "html!: Vec<u8>" FROM revision_files f
+    let row = sqlx::query!(
+        r#"SELECT f.content as "content: Vec<u8>", f.object_key as "object_key: String"
+           FROM revision_files f
            JOIN revisions r ON r.id = f.revision_id
            WHERE r.document_id = ? AND r.revision = ? AND f.path = 'index.html'"#,
         doc.id,
@@ -418,8 +448,16 @@ async fn document_page(
     )
     .fetch_optional(pool)
     .await;
-    let mut body = match html {
-        Ok(Some(html)) => html,
+    let mut body = match row {
+        Ok(Some(row)) => match crate::blobs::resolve(blobs, row.content, row.object_key).await {
+            Ok(body) => body,
+            Err(error) => {
+                tracing::warn!(document = doc.id, %error, "cannot read the document body");
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .finish();
+            }
+        },
         Ok(None) => return not_found(),
         Err(_) => {
             return Response::builder()
@@ -642,12 +680,13 @@ fn answer_widget_fragment(
 pub async fn render_page(
     req: &Request,
     pool: Data<&SqlitePool>,
+    blobs: Data<&Option<crate::blobs::Blobs>>,
     Path(revision_id): Path<i64>,
 ) -> Response {
     if !is_loopback(req) {
         return not_found();
     }
-    serve_revision_file(pool.0, revision_id, "index.html").await
+    serve_revision_file(pool.0, blobs.0.as_ref(), revision_id, "index.html").await
 }
 
 /// The revision as the preview worker sees it: the entry document at the
@@ -662,13 +701,14 @@ pub async fn render_page(
 pub async fn render_asset(
     req: &Request,
     pool: Data<&SqlitePool>,
+    blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((revision_id, path)): Path<(i64, String)>,
 ) -> Response {
     if !is_loopback(req) {
         return not_found();
     }
     let path = if path.is_empty() { "index.html" } else { &path };
-    serve_revision_file(pool.0, revision_id, path).await
+    serve_revision_file(pool.0, blobs.0.as_ref(), revision_id, path).await
 }
 
 fn is_loopback(req: &Request) -> bool {
@@ -677,9 +717,15 @@ fn is_loopback(req: &Request) -> bool {
         .is_some_and(|addr| addr.ip().is_loopback())
 }
 
-async fn serve_revision_file(pool: &SqlitePool, revision_id: i64, path: &str) -> Response {
+async fn serve_revision_file(
+    pool: &SqlitePool,
+    blobs: Option<&crate::blobs::Blobs>,
+    revision_id: i64,
+    path: &str,
+) -> Response {
     let row = sqlx::query!(
-        r#"SELECT content as "content!: Vec<u8>", content_type as "content_type!: String"
+        r#"SELECT content as "content: Vec<u8>", object_key as "object_key: String",
+                  content_type as "content_type!: String"
            FROM revision_files WHERE revision_id = ? AND path = ?"#,
         revision_id,
         path
@@ -690,11 +736,21 @@ async fn serve_revision_file(pool: &SqlitePool, revision_id: i64, path: &str) ->
     .flatten();
 
     match row {
-        Some(row) => Response::builder()
-            .content_type(row.content_type)
-            .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-scripts")
-            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-            .body(row.content),
+        // a failure here is what silently renders a preview without its assets,
+        // so it is logged rather than folded into the not found case
+        Some(row) => match crate::blobs::resolve(blobs, row.content, row.object_key).await {
+            Ok(content) => Response::builder()
+                .content_type(row.content_type)
+                .header(header::CONTENT_SECURITY_POLICY, "sandbox allow-scripts")
+                .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+                .body(content),
+            Err(error) => {
+                tracing::warn!(revision_id, path, %error, "cannot read a revision file");
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .finish()
+            }
+        },
         None => not_found(),
     }
 }

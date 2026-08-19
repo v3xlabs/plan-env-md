@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT f.id as \"id!: i64\", f.content as \"content!: Vec<u8>\"\n           FROM revision_files f\n           JOIN revisions r ON r.id = f.revision_id\n           WHERE f.content IS NOT NULL\n             AND (f.size_bytes > ?\n                  OR r.revision < (SELECT MAX(revision) FROM revisions\n                                   WHERE document_id = r.document_id))\n           LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "content!: Vec<u8>",
+        "ordinal": 1,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "a36639e7801ec779698414a5802b54d27fb15bcb0618629244f1ae46a3522c5f"
+}

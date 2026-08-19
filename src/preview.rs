@@ -28,7 +28,7 @@ const MAX_ATTEMPTS: i64 = 3;
 const SETTLE: Duration = Duration::from_millis(900);
 const IDLE_POLL: Duration = Duration::from_secs(5);
 
-pub fn spawn(pool: SqlitePool, port: u16) {
+pub fn spawn(pool: SqlitePool, port: u16, blobs: Option<crate::blobs::Blobs>) {
     let Ok(chromium) = std::env::var("PREVIEW_CHROMIUM") else {
         tracing::info!("PREVIEW_CHROMIUM is unset; previews are off");
         return;
@@ -44,13 +44,18 @@ pub fn spawn(pool: SqlitePool, port: u16) {
         .execute(&pool)
         .await;
 
-        if let Err(error) = run(pool, port, chromium).await {
+        if let Err(error) = run(pool, port, chromium, blobs).await {
             tracing::error!(%error, "preview worker stopped");
         }
     });
 }
 
-async fn run(pool: SqlitePool, port: u16, chromium: String) -> Result<(), String> {
+async fn run(
+    pool: SqlitePool,
+    port: u16,
+    chromium: String,
+    blobs: Option<crate::blobs::Blobs>,
+) -> Result<(), String> {
     let config = BrowserConfig::builder()
         .chrome_executable(chromium)
         .no_sandbox()
@@ -81,7 +86,7 @@ async fn run(pool: SqlitePool, port: u16, chromium: String) -> Result<(), String
         match claim(&pool).await {
             Some(job) => {
                 let outcome = render(&browser, port, job.revision_id, &job.scheme).await;
-                finish(&pool, &job, outcome).await;
+                finish(&pool, blobs.as_ref(), &job, outcome).await;
             }
             None => tokio::time::sleep(IDLE_POLL).await,
         }
@@ -170,18 +175,32 @@ async fn capture(
     .map_err(|e| e.to_string())
 }
 
-async fn finish(pool: &SqlitePool, job: &Job, outcome: Result<Vec<u8>, String>) {
+async fn finish(
+    pool: &SqlitePool,
+    blobs: Option<&crate::blobs::Blobs>,
+    job: &Job,
+    outcome: Result<Vec<u8>, String>,
+) {
     let width = (f64::from(WIDTH) * SCALE) as i64;
     let height = (f64::from(HEIGHT) * SCALE) as i64;
 
+    // a thumbnail is derived data, so it goes straight to the bucket when there
+    // is one rather than being written inline for the sweep to move later
+    let outcome = match (outcome, blobs) {
+        (Ok(image), Some(blobs)) => blobs.put(&image).await.map(|key| (None, Some(key))),
+        (Ok(image), None) => Ok((Some(image), None)),
+        (Err(error), _) => Err(error),
+    };
+
     let result = match outcome {
-        Ok(image) => {
+        Ok((image, object_key)) => {
             sqlx::query!(
                 "UPDATE revision_previews
-                 SET status = 'ready', image = ?, content_type = 'image/webp',
+                 SET status = 'ready', image = ?, object_key = ?, content_type = 'image/webp',
                      width = ?, height = ?, error = NULL, updated_at = datetime('now')
                  WHERE revision_id = ? AND scheme = ?",
                 image,
+                object_key,
                 width,
                 height,
                 job.revision_id,

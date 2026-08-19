@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT revision_id as \"revision_id!: i64\", scheme as \"scheme!: String\",\n                  image as \"image!: Vec<u8>\"\n           FROM revision_previews\n           WHERE image IS NOT NULL AND object_key IS NULL AND status = 'ready'\n           LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "revision_id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheme!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "image!: Vec<u8>",
+        "ordinal": 2,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "05cb107f9dab0404e13e9237b7bb55bcbe03c55342898cff7e31cb71d5e14955"
+}

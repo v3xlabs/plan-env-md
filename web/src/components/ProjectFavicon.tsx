@@ -29,13 +29,22 @@ export const ProjectFavicon = (properties: Properties) => {
         </span>
       )}
     >
-      <img
-        src={faviconUrl(properties.project, properties.scheme ?? "light")}
-        alt=""
-        class={properties.class}
-        classList={{ "rounded object-contain": true }}
-        onError={() => setBroken(true)}
-      />
+      {/* A named scheme feeds both candidates, so the settings page keeps
+          showing the variant it is about while everywhere else follows the
+          reader. `contents` keeps the image itself as the layout box. */}
+      <picture class="contents">
+        <source
+          media="(prefers-color-scheme: dark)"
+          srcset={faviconUrl(properties.project, properties.scheme ?? "dark")}
+        />
+        <img
+          src={faviconUrl(properties.project, properties.scheme ?? "light")}
+          alt=""
+          class={properties.class}
+          classList={{ "rounded object-contain": true }}
+          onError={() => setBroken(true)}
+        />
+      </picture>
     </Show>
   );
 };

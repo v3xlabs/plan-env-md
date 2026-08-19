@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT r.id as \"id!: i64\" FROM revisions r\n               JOIN documents d ON d.id = r.document_id\n               WHERE d.owner_id = ? AND d.slug = ?\n               ORDER BY r.revision DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "efa7ec6ff469c9dd3d12dd221f3862060ac89012a27bd0e1317975c93020be7e"
+}

@@ -1056,6 +1056,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/docs/{slug}/preview/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue the latest revision's thumbnail to be rendered again.
+         * @description A stored preview is never revisited on its own, so a thumbnail captured
+         *     by a broken renderer, or before the page's own assets existed, would
+         *     otherwise stay wrong forever.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No document with this slug on this account, or it has no revisions */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docs/{slug}/questions": {
         parameters: {
             query?: never;

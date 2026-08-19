@@ -1,8 +1,10 @@
 mod answer_key;
 mod api;
 mod auth;
+mod blobs;
 mod config;
 mod db;
+mod demote;
 mod preview;
 mod rate_limit;
 mod static_files;
@@ -15,7 +17,12 @@ use poem::middleware::{CookieJarManager, Tracing};
 use poem::{EndpointExt, Route, Server, get};
 use sqlx::SqlitePool;
 
-fn app(pool: SqlitePool, base_url: config::BaseUrl, secret: config::Secret) -> impl poem::Endpoint {
+fn app(
+    pool: SqlitePool,
+    base_url: config::BaseUrl,
+    secret: config::Secret,
+    blobs: Option<blobs::Blobs>,
+) -> impl poem::Endpoint {
     let service = api::service();
     let spec = service.spec_endpoint();
     let scalar = service.scalar();
@@ -54,6 +61,7 @@ fn app(pool: SqlitePool, base_url: config::BaseUrl, secret: config::Secret) -> i
         .data(pool)
         .data(base_url)
         .data(secret)
+        .data(blobs)
         .data(rate_limit::RateLimiter::default())
 }
 
@@ -75,6 +83,30 @@ async fn main() {
         tracing::warn!("SECRET is unset; visitor access cookies use the insecure dev secret");
     }
 
+    // a bucket that cannot be reached must stop the process here. Serving on
+    // regardless would accept pushes, record keys for objects that were never
+    // stored, and only show the damage when somebody opens an old document.
+    let blobs = match &config.bucket {
+        Some(bucket) => {
+            let blobs = blobs::Blobs::new(bucket).expect("bucket setup failed");
+            blobs.check().await.expect("bucket is not usable");
+            tracing::info!(bucket = %bucket.name, "blob storage ready");
+            Some(blobs)
+        }
+        None => {
+            tracing::info!("S3_BUCKET is unset; every blob stays in the database");
+            None
+        }
+    };
+
+    if std::env::args().nth(1).as_deref() == Some("demote") {
+        let moved = demote::sweep_all(&pool, blobs.as_ref())
+            .await
+            .expect("demote failed");
+        println!("moved {moved} bodies to the bucket");
+        return;
+    }
+
     // the worker drives a browser at the loopback render route, so it needs the
     // port this process actually listens on
     let port = config
@@ -82,7 +114,8 @@ async fn main() {
         .rsplit_once(':')
         .and_then(|(_, port)| port.parse().ok())
         .expect("BIND must end in :port");
-    preview::spawn(pool.clone(), port);
+    preview::spawn(pool.clone(), port, blobs.clone());
+    demote::spawn(pool.clone(), blobs.clone());
 
     tracing::info!(bind = %config.bind, "listening");
     Server::new(TcpListener::bind(&config.bind))
@@ -90,6 +123,7 @@ async fn main() {
             pool,
             config::BaseUrl(config.base_url),
             config::Secret(config.secret),
+            blobs,
         ))
         .await
         .expect("server failed");

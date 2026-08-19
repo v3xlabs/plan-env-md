@@ -3,7 +3,18 @@ use poem::{Endpoint, Request, Response};
 use serde_json::{Value, json};
 use sqlx::sqlite::SqlitePoolOptions;
 
+/// No bucket, so every body stays inline. This is the shape almost every test
+/// wants, and it needs no credentials and no network.
 async fn test_app() -> impl Endpoint {
+    let (app, _, _) = test_app_with_blobs(None).await;
+    app
+}
+
+/// Returns the pool and the store alongside the app, so a test can assert on
+/// where a body actually landed rather than only on what the API replies.
+async fn test_app_with_blobs(
+    blobs: Option<crate::blobs::Blobs>,
+) -> (impl Endpoint, sqlx::SqlitePool, Option<crate::blobs::Blobs>) {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -13,11 +24,13 @@ async fn test_app() -> impl Endpoint {
         .run(&pool)
         .await
         .expect("migrations");
-    crate::app(
-        pool,
+    let app = crate::app(
+        pool.clone(),
         crate::config::BaseUrl("http://test.local".to_string()),
         crate::config::Secret("test-secret".to_string()),
-    )
+        blobs.clone(),
+    );
+    (app, pool, blobs)
 }
 
 struct Call<'a> {
@@ -1692,4 +1705,108 @@ async fn the_render_route_serves_the_entry_and_its_assets_over_loopback() {
         .unwrap();
     assert!(asset.starts_with("HTTP/1.1 200 OK"), "asset: {asset}");
     assert!(asset.contains("h1{color:red}"), "asset: {asset}");
+}
+
+#[tokio::test]
+async fn refreshing_a_preview_requeues_a_stored_one() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push(&app, &token, "plan", "<h1>plan</h1>").await;
+
+    let response = call(
+        &app,
+        Method::POST,
+        "/api/docs/plan/preview/refresh",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    let response = call(
+        &app,
+        Method::POST,
+        "/api/docs/nothing/preview/refresh",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A body over the inline limit goes to the bucket, and every read path still
+/// returns it. Without this the split storage is only ever exercised in
+/// production, where the failure mode is a document that will not open.
+#[tokio::test]
+async fn a_large_body_lands_in_the_bucket_and_still_reads_back() {
+    let (app, pool, _) = test_app_with_blobs(Some(crate::blobs::Blobs::in_memory())).await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let filler = "x".repeat(crate::blobs::INLINE_LIMIT as usize + 1);
+    let html = format!("<h1>big</h1><!--{filler}-->");
+    assert_eq!(push(&app, &token, "big", &html).await.status(), StatusCode::OK);
+
+    let (content, object_key): (Option<Vec<u8>>, Option<String>) =
+        sqlx::query_as("SELECT content, object_key FROM revision_files WHERE path = 'index.html'")
+            .fetch_one(&pool)
+            .await
+            .expect("the row exists");
+    assert!(content.is_none(), "the bytes should not be inline");
+    assert!(object_key.is_some(), "the row should carry a key");
+
+    let raw = call(
+        &app,
+        Method::GET,
+        "/api/docs/big/raw",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(raw.status(), StatusCode::OK);
+    assert!(
+        raw.into_body().into_string().await.unwrap().contains("<h1>big</h1>"),
+        "the raw route should resolve the body out of the bucket"
+    );
+}
+
+/// The sweep moves a superseded revision out and leaves the latest one inline,
+/// which is the whole point of tiering by supersession rather than by size.
+#[tokio::test]
+async fn the_sweep_demotes_superseded_revisions_only() {
+    let blobs = crate::blobs::Blobs::in_memory();
+    let (app, pool, _) = test_app_with_blobs(Some(blobs.clone())).await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    push(&app, &token, "plan", "<h1>first</h1>").await;
+    push(&app, &token, "plan", "<h1>second</h1>").await;
+
+    let moved = crate::demote::sweep_all(&pool, Some(&blobs))
+        .await
+        .expect("the sweep runs");
+    assert_eq!(moved, 1, "only the superseded revision should move");
+
+    let inline: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM revision_files WHERE content IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(inline, 1, "the latest revision stays inline");
+
+    // the pinned URL for the demoted revision must still serve its body
+    let old = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan/revisions/1/raw",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(old.status(), StatusCode::OK);
+    assert!(
+        old.into_body().into_string().await.unwrap().contains("<h1>first</h1>"),
+        "a superseded revision must read back out of the bucket"
+    );
 }
