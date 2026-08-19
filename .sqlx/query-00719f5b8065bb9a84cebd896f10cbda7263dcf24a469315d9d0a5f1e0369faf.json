@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.slug as \"slug!: String\",\n                      COUNT(d.id) as \"document_count!: i64\",\n                      MAX(r.last_pushed_at) as \"last_pushed_at: String\",\n                      p.favicon_light IS NOT NULL as \"has_favicon_light!: bool\",\n                      p.favicon_dark IS NOT NULL as \"has_favicon_dark!: bool\"\n               FROM projects p\n               LEFT JOIN documents d ON d.owner_id = p.owner_id AND d.project = p.slug\n               LEFT JOIN (SELECT document_id, MAX(created_at) AS last_pushed_at\n                          FROM revisions GROUP BY document_id) r ON r.document_id = d.id\n               WHERE p.owner_id = ?\n               GROUP BY p.id\n               ORDER BY MAX(r.last_pushed_at) IS NULL, MAX(r.last_pushed_at) DESC, p.slug",
+  "describe": {
+    "columns": [
+      {
+        "name": "slug!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "document_count!: i64",
+        "ordinal": 1,
+        "type_info": "Null"
+      },
+      {
+        "name": "last_pushed_at: String",
+        "ordinal": 2,
+        "type_info": "Null"
+      },
+      {
+        "name": "has_favicon_light!: bool",
+        "ordinal": 3,
+        "type_info": "Null"
+      },
+      {
+        "name": "has_favicon_dark!: bool",
+        "ordinal": 4,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "00719f5b8065bb9a84cebd896f10cbda7263dcf24a469315d9d0a5f1e0369faf"
+}

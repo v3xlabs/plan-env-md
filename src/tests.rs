@@ -331,6 +331,83 @@ async fn push(app: &impl Endpoint, token: &str, slug: &str, html: &str) -> Respo
     app.get_response(request).await
 }
 
+/// Push through the multipart path, which is the only one carrying metadata.
+async fn push_with_meta(
+    app: &impl Endpoint,
+    token: &str,
+    slug: &str,
+    html: &str,
+    meta: Value,
+) -> Response {
+    const BOUNDARY: &str = "planenvtestboundary";
+    let body = format!(
+        "--{BOUNDARY}\r\n\
+         Content-Disposition: form-data; name=\"meta\"\r\n\
+         Content-Type: application/json\r\n\r\n\
+         {meta}\r\n\
+         --{BOUNDARY}\r\n\
+         Content-Disposition: form-data; name=\"index.html\"\r\n\
+         Content-Type: text/html\r\n\r\n\
+         {html}\r\n\
+         --{BOUNDARY}--\r\n"
+    );
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/api/docs/{slug}").parse().unwrap())
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .content_type(&format!("multipart/form-data; boundary={BOUNDARY}"))
+        .body(body);
+    app.get_response(request).await
+}
+
+fn one_question() -> Value {
+    json!({ "questions": [{
+        "key": "P4",
+        "anchor": "P4",
+        "prompt": "Accept the trailing slash URL change?",
+        "options": [
+            { "value": "accept", "label": "Accept" },
+            { "value": "defer", "label": "Defer" }
+        ]
+    }]})
+}
+
+/// The key the viewer hands the widget, read back out of the served document.
+async fn scoped_key(app: &impl Endpoint, cookie: &str, id: &str, slug: &str) -> Option<String> {
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/{id}/{slug}/").parse().unwrap())
+        .header(header::COOKIE, cookie)
+        .finish();
+    let html = app
+        .get_response(request)
+        .await
+        .into_body()
+        .into_string()
+        .await
+        .unwrap();
+    let start = html.find("data-planenv-key=\"")? + "data-planenv-key=\"".len();
+    let rest = &html[start..];
+    Some(rest[..rest.find('"')?].to_string())
+}
+
+async fn answer(
+    app: &impl Endpoint,
+    slug: &str,
+    key: &str,
+    body: Value,
+    auth: Call<'_>,
+) -> Response {
+    call(
+        app,
+        Method::PUT,
+        &format!("/api/docs/{slug}/answers/{key}"),
+        Some(body),
+        auth,
+    )
+    .await
+}
+
 async fn agent_token(app: &impl Endpoint, cookie: &str) -> String {
     let response = call(
         app,
@@ -429,11 +506,11 @@ async fn push_validates_slug_and_size() {
     let response = push(&app, &token, "Bad_Slug", "<p>hi</p>").await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
-    let exactly_max = "a".repeat(crate::api::docs::MAX_HTML_BYTES);
+    let exactly_max = "a".repeat(crate::api::upload::MAX_ENTRY_BYTES);
     let response = push(&app, &token, "big", &exactly_max).await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    let too_big = "a".repeat(crate::api::docs::MAX_HTML_BYTES + 1);
+    let too_big = "a".repeat(crate::api::upload::MAX_ENTRY_BYTES + 1);
     let response = push(&app, &token, "too-big", &too_big).await;
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
@@ -552,7 +629,7 @@ async fn public_view_password_gate_lifecycle() {
         .unwrap()
         .to_string();
     push(&app, &token, "plan", "<h1>rev two</h1>").await;
-    let doc_path = format!("/{id}/plan");
+    let doc_path = format!("/{id}/plan/");
 
     // private: visitor sees 404; the owner sees the document itself with the
     // overlay (revision menu, Share) appended
@@ -578,7 +655,8 @@ async fn public_view_password_gate_lifecycle() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         json_body(response).await["url"],
-        json!(format!("http://test.local{doc_path}"))
+        // the bare URL stays the emitted permalink; it 308s to the directory form
+        json!(format!("http://test.local/{id}/plan"))
     );
 
     // a PAT must not be able to publish
@@ -625,7 +703,7 @@ async fn public_view_password_gate_lifecycle() {
     let response = call(
         &app,
         Method::GET,
-        &format!("{doc_path}/rev/1"),
+        &format!("{doc_path}rev/1/"),
         None,
         with_cookie(&access),
     )
@@ -684,30 +762,44 @@ async fn stale_slug_redirects_to_canonical_url() {
         with_cookie(&cookie),
     )
     .await;
+    // the bare URL redirects to its directory form without a database hit, and
+    // the canonical slug redirect happens there
     assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
     assert_eq!(
         response.headers().get(header::LOCATION).unwrap(),
-        &format!("/{id}/real-slug")
+        &format!("/{id}/wrong-slug/")
     );
-
     let response = call(
         &app,
         Method::GET,
-        &format!("/{id}/wrong-slug/rev/1"),
+        &format!("/{id}/wrong-slug/"),
         None,
         with_cookie(&cookie),
     )
     .await;
     assert_eq!(
         response.headers().get(header::LOCATION).unwrap(),
-        &format!("/{id}/real-slug/rev/1")
+        &format!("/{id}/real-slug/")
+    );
+
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{id}/wrong-slug/rev/1/"),
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        &format!("/{id}/real-slug/rev/1/")
     );
 
     // an unknown public id is a plain 404
     let response = call(
         &app,
         Method::GET,
-        "/AAAAAAAAAA/whatever",
+        "/AAAAAAAAAA/whatever/",
         None,
         with_cookie(&cookie),
     )
@@ -732,8 +824,11 @@ async fn docs_page_and_spa_fallback_routing() {
     let client_detail = call(&app, Method::GET, "/documents/anything", None, ANON).await;
     assert_eq!(spa_route.status(), client_detail.status());
 
-    // a doc-shaped miss stays a hard 404
+    // a doc-shaped path redirects to its directory form without touching the
+    // database, so the redirect itself signals nothing; the miss is a hard 404
     let response = call(&app, Method::GET, "/AAAAAAAAAA/nope", None, ANON).await;
+    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+    let response = call(&app, Method::GET, "/AAAAAAAAAA/nope/", None, ANON).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
@@ -898,7 +993,7 @@ async fn share_page_is_owner_only() {
     let response = call(
         &app,
         Method::GET,
-        &format!("/{id}/shared-plan"),
+        &format!("/{id}/shared-plan/"),
         None,
         with_cookie(&cookie),
     )
@@ -906,4 +1001,628 @@ async fn share_page_is_owner_only() {
     let text = response.into_body().into_string().await.unwrap();
     assert!(text.contains(&share_path));
     assert!(text.contains("window.open"));
+}
+
+#[tokio::test]
+async fn answers_reject_agent_tokens_but_accept_sessions_and_scoped_keys() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = push_with_meta(&app, &token, "plan", "<h1>plan</h1>", one_question()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // the token that pushed the document cannot answer its questions: an answer
+    // records what a human decided
+    let response = answer(
+        &app,
+        "plan",
+        "P4",
+        json!({ "selected": ["accept"] }),
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = answer(&app, "plan", "P4", json!({ "selected": ["accept"] }), ANON).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = answer(
+        &app,
+        "plan",
+        "P4",
+        json!({ "selected": ["accept"] }),
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let key = scoped_key(&app, &cookie, &id, "plan")
+        .await
+        .expect("owner gets a scoped key");
+    let response = answer(
+        &app,
+        "plan",
+        "P4",
+        json!({ "selected": ["defer"], "notes": "after the previews" }),
+        with_bearer(&key),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan/questions",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    let body = json_body(response).await;
+    assert_eq!(body[0]["answer"]["selected"], json!(["defer"]));
+    assert_eq!(body[0]["answer"]["notes"], json!("after the previews"));
+}
+
+#[tokio::test]
+async fn a_scoped_key_is_bound_to_one_document() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = push_with_meta(&app, &token, "first", "<h1>first</h1>", one_question()).await;
+    let first_id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    push_with_meta(&app, &token, "second", "<h1>second</h1>", one_question()).await;
+
+    let key = scoped_key(&app, &cookie, &first_id, "first").await.unwrap();
+
+    let response = answer(
+        &app,
+        "second",
+        "P4",
+        json!({ "selected": ["accept"] }),
+        with_bearer(&key),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let tampered = format!("{}00", &key[..key.len() - 2]);
+    let response = answer(
+        &app,
+        "first",
+        "P4",
+        json!({ "selected": ["accept"] }),
+        with_bearer(&tampered),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_answer_must_fit_the_question_that_was_asked() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push_with_meta(&app, &token, "plan", "<h1>plan</h1>", one_question()).await;
+
+    for body in [
+        json!({ "selected": [] }),
+        json!({ "selected": ["nonsense"] }),
+        json!({ "selected": ["accept", "defer"] }),
+        json!({ "selected": ["other"] }),
+        json!({ "selected": ["accept"], "other_text": "sneaky" }),
+    ] {
+        let response = answer(&app, "plan", "P4", body.clone(), with_cookie(&cookie)).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "expected {body} to be rejected"
+        );
+    }
+
+    // a question the revision does not ask cannot be answered at all
+    let response = answer(
+        &app,
+        "plan",
+        "invented",
+        json!({ "selected": ["accept"] }),
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_answer_survives_a_revision_that_asks_again() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push_with_meta(&app, &token, "plan", "<h1>one</h1>", one_question()).await;
+    answer(
+        &app,
+        "plan",
+        "P4",
+        json!({ "selected": ["accept"] }),
+        with_cookie(&cookie),
+    )
+    .await;
+
+    // revision 2 asks P4 again and adds P9
+    let mut meta = one_question();
+    meta["questions"].as_array_mut().unwrap().push(json!({
+        "key": "P9",
+        "prompt": "Approve the preview worker?",
+        "options": [
+            { "value": "yes", "label": "Yes" },
+            { "value": "no", "label": "No" }
+        ]
+    }));
+    push_with_meta(&app, &token, "plan", "<h1>two</h1>", meta).await;
+
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan/questions",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    let body = json_body(response).await;
+    assert_eq!(body[0]["key"], json!("P4"));
+    assert_eq!(body[0]["answer"]["selected"], json!(["accept"]));
+    assert_eq!(body[1]["key"], json!("P9"));
+    assert_eq!(body[1]["answer"], json!(null));
+
+    // revision 3 stops asking anything; the answer is orphaned, not deleted
+    push_with_meta(&app, &token, "plan", "<h1>three</h1>", json!({})).await;
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan/questions",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(json_body(response).await, json!([]));
+}
+
+#[tokio::test]
+async fn visitors_get_no_widget_no_key_and_no_questions() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    let response = push_with_meta(&app, &token, "plan", "<h1>plan</h1>", one_question()).await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    call(
+        &app,
+        Method::POST,
+        "/api/docs/plan/publish",
+        Some(json!({ "password": "visitorpass" })),
+        with_cookie(&cookie),
+    )
+    .await;
+
+    let response = unlock(&app, &format!("/{id}/plan"), "visitorpass").await;
+    let access = access_cookie_of(&response);
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/{id}/plan/").parse().unwrap())
+        .header(header::COOKIE, &access)
+        .finish();
+    let html = app
+        .get_response(request)
+        .await
+        .into_body()
+        .into_string()
+        .await
+        .unwrap();
+    assert!(!html.contains("planq_"), "visitor must not receive a key");
+    assert!(!html.contains("/_planenv/answer"));
+    assert!(!html.contains(r#"id="planenv-questions""#));
+
+    // and the owner viewing the same document does get all three
+    assert!(scoped_key(&app, &cookie, &id, "plan").await.is_some());
+}
+
+#[tokio::test]
+async fn a_question_may_not_declare_the_reserved_written_answer() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let meta = json!({ "questions": [{
+        "key": "P4",
+        "prompt": "Accept?",
+        "options": [
+            { "value": "other", "label": "Something else" },
+            { "value": "accept", "label": "Accept" }
+        ]
+    }]});
+    let response = push_with_meta(&app, &token, "plan", "<h1>plan</h1>", meta).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn a_question_cannot_break_out_of_the_json_island() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let meta = json!({ "questions": [{
+        "key": "P4",
+        "prompt": "</script><script>window.stolen=document.currentScript</script>",
+        "options": [
+            { "value": "accept", "label": "Accept" },
+            { "value": "defer", "label": "Defer" }
+        ]
+    }]});
+    let response = push_with_meta(&app, &token, "plan", "<h1>plan</h1>", meta).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/{id}/plan/").parse().unwrap())
+        .header(header::COOKIE, &cookie)
+        .finish();
+    let html = app
+        .get_response(request)
+        .await
+        .into_body()
+        .into_string()
+        .await
+        .unwrap();
+
+    let island = html
+        .split_once(r#"<script type="application/json" id="planenv-questions">"#)
+        .expect("question island")
+        .1;
+    let island = island.split_once("</script>").expect("island ends").0;
+    assert!(
+        !island.contains('<'),
+        "no raw < may survive into the island: {island}"
+    );
+    // and it still parses back to the prompt that was pushed
+    let parsed: Value = serde_json::from_str(island).expect("island is valid JSON");
+    assert_eq!(
+        parsed[0]["prompt"],
+        json!("</script><script>window.stolen=document.currentScript</script>")
+    );
+}
+
+/// Push a file set through multipart, one part per path.
+async fn push_files(
+    app: &impl Endpoint,
+    token: &str,
+    slug: &str,
+    files: &[(&str, &str)],
+) -> Response {
+    const BOUNDARY: &str = "planenvfileboundary";
+    let mut body = String::new();
+    for (path, content) in files {
+        body.push_str(&format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{path}\"\r\n\r\n{content}\r\n"
+        ));
+    }
+    body.push_str(&format!("--{BOUNDARY}--\r\n"));
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/api/docs/{slug}").parse().unwrap())
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .content_type(&format!("multipart/form-data; boundary={BOUNDARY}"))
+        .body(body);
+    app.get_response(request).await
+}
+
+#[tokio::test]
+async fn a_revision_serves_its_assets_beside_the_document() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = push_files(
+        &app,
+        &token,
+        "multi",
+        &[
+            ("index.html", "<h1>multi</h1>"),
+            ("style.css", "h1{color:red}"),
+            ("img/dot.svg", "<svg/>"),
+        ],
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for (path, content_type) in [
+        ("style.css", "text/css; charset=utf-8"),
+        ("img/dot.svg", "image/svg+xml"),
+    ] {
+        let response = call(
+            &app,
+            Method::GET,
+            &format!("/{id}/multi/{path}"),
+            None,
+            with_cookie(&cookie),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK, "{path} should be served");
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type,
+            "content type comes from the extension, not the caller"
+        );
+    }
+
+    // a private document's assets are as invisible as the document itself
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{id}/multi/style.css"),
+        None,
+        ANON,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{id}/multi/nothing.css"),
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_file_set_must_fit_its_rules() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    for files in [
+        // no entry document
+        &[("style.css", "x")][..],
+        // reserved by the document's own URLs
+        &[("index.html", "<h1>x</h1>"), ("share", "x")][..],
+        &[("index.html", "<h1>x</h1>"), ("rev/2.css", "x")][..],
+        // traversal
+        &[("index.html", "<h1>x</h1>"), ("../secret.css", "x")][..],
+        &[("index.html", "<h1>x</h1>"), ("/etc/passwd.txt", "x")][..],
+        // extension not on the allowlist
+        &[("index.html", "<h1>x</h1>"), ("payload.exe", "x")][..],
+    ] {
+        let response = push_files(&app, &token, "bad", files).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "expected {files:?} to be rejected"
+        );
+    }
+
+    // and nothing was written by any of them
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/bad",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_assets_cookie_is_bound_to_one_document() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let first = push_files(
+        &app,
+        &token,
+        "first",
+        &[("index.html", "<h1>a</h1>"), ("a.css", "a")],
+    )
+    .await;
+    let first_id = json_body(first).await["id"].as_str().unwrap().to_string();
+    let second = push_files(
+        &app,
+        &token,
+        "second",
+        &[("index.html", "<h1>b</h1>"), ("b.css", "b")],
+    )
+    .await;
+    let second_id = json_body(second).await["id"].as_str().unwrap().to_string();
+
+    // viewing a document hands out the cookie its subresources need, because a
+    // sandboxed page sends no SameSite=Lax cookie of its own
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{first_id}/first/"),
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    let assets = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| {
+            value
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_string()
+        })
+        .find(|value| value.starts_with("doc_assets="))
+        .expect("the document page issues an assets cookie");
+
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{first_id}/first/a.css"),
+        None,
+        with_cookie(&assets),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // the same cookie is worthless against another document
+    let response = call(
+        &app,
+        Method::GET,
+        &format!("/{second_id}/second/b.css"),
+        None,
+        with_cookie(&assets),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_alias_is_another_name_for_one_project() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = call(
+        &app,
+        Method::PUT,
+        "/api/projects/open-lavatory/aliases/openlv",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // a push naming the alias lands in the canonical project
+    push_with_meta(
+        &app,
+        &token,
+        "lav",
+        "<h1>lav</h1>",
+        json!({ "project": "openlv" }),
+    )
+    .await;
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/lav",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(json_body(response).await["project"], json!("open-lavatory"));
+
+    // and setting an icon through the alias does not mint a project for it
+    let response = call(
+        &app,
+        Method::PUT,
+        "/api/projects/openlv/favicon",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    // an empty body is refused, so nothing is created either way
+    assert!(response.status().is_client_error());
+
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/projects",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    let projects = json_body(response).await;
+    let slugs: Vec<&str> = projects
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["slug"].as_str().unwrap())
+        .collect();
+    assert_eq!(slugs, vec!["open-lavatory"]);
+    assert_eq!(projects[0]["aliases"], json!(["openlv"]));
+
+    // a name is either a project or an alias, never both
+    let response = call(
+        &app,
+        Method::PUT,
+        "/api/projects/something-else/aliases/open-lavatory",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_project_listing_is_scoped_and_capped() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    for slug in ["a", "b", "c"] {
+        push_with_meta(
+            &app,
+            &token,
+            slug,
+            "<h1>x</h1>",
+            json!({ "project": "alpha" }),
+        )
+        .await;
+    }
+    push_with_meta(
+        &app,
+        &token,
+        "other",
+        "<h1>x</h1>",
+        json!({ "project": "beta" }),
+    )
+    .await;
+
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs?project=alpha",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    assert_eq!(json_body(response).await.as_array().unwrap().len(), 3);
+
+    // newest first, so a limit reads the most recent work
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs?project=alpha&limit=2",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    let body = json_body(response).await;
+    assert_eq!(body.as_array().unwrap().len(), 2);
+    assert_eq!(body[0]["slug"], json!("c"));
 }

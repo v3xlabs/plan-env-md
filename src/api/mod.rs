@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod docs;
 pub mod invites;
+pub mod projects;
+pub mod question;
 pub mod tokens;
+pub mod upload;
 
 use poem_openapi::payload::PlainText;
 use poem_openapi::{OpenApi, OpenApiService};
@@ -22,6 +25,7 @@ type Apis = (
     auth::AuthApi,
     tokens::TokensApi,
     invites::InvitesApi,
+    projects::ProjectsApi,
     docs::DocsApi,
 );
 
@@ -32,6 +36,7 @@ pub fn service() -> OpenApiService<Apis, ()> {
             auth::AuthApi,
             tokens::TokensApi,
             invites::InvitesApi,
+            projects::ProjectsApi,
             docs::DocsApi,
         ),
         "plan-env-md",

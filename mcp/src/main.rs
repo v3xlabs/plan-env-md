@@ -19,10 +19,70 @@ struct PushRequest {
         description = "A lowercase, hyphen-separated document slug. Reusing it creates a new revision."
     )]
     slug: String,
-    #[schemars(description = "Complete self-contained HTML document.")]
-    html: String,
+    #[schemars(
+        description = "The complete HTML document. Use this or files, not both. Assets need files."
+    )]
+    html: Option<String>,
+    #[schemars(
+        description = "Files to upload, read from disk by this server. One must be index.html. Paths are relative and may nest, for example img/chart.webp."
+    )]
+    files: Option<Vec<PushFile>>,
     #[schemars(description = "Optional document title. Existing titles remain when omitted.")]
     title: Option<String>,
+    #[schemars(
+        description = "Project this document belongs to. Created on first use; an existing alias resolves to its project. Call plan_projects first to reuse the right name."
+    )]
+    project: Option<String>,
+    #[schemars(
+        description = "Loose tags such as plan, review, pr-review, audit, roadmap, spec, status, explainer, comparison, mockup, research. Normalised to lowercase hyphens. Omitting leaves existing tags alone; an empty list clears them."
+    )]
+    tags: Option<Vec<String>>,
+    #[schemars(
+        description = "Decisions to ask the reader, answered in the document itself. Each needs key, prompt and at least two options; anchor links a question to an element id in the page. The reader can always write their own answer or add a note, so do not add an option for that."
+    )]
+    questions: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct PushFile {
+    #[schemars(
+        description = "Path inside the document, for example index.html or img/chart.webp."
+    )]
+    path: String,
+    #[schemars(description = "Absolute path on this machine to read the bytes from.")]
+    source: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ProjectDocumentsRequest {
+    #[schemars(description = "Project slug or alias.")]
+    project: String,
+    #[schemars(description = "How many of the most recent documents to return. Defaults to 10.")]
+    limit: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetFaviconRequest {
+    #[schemars(description = "Project slug or alias.")]
+    project: String,
+    #[schemars(
+        description = "Absolute path to a PNG, SVG, WebP, GIF or ICO of at most 64 KB. Square, legible at 16 pixels."
+    )]
+    source: String,
+    #[schemars(
+        description = "Which colour scheme this icon is for: light or dark. Upload both so the tab icon matches the reader's theme."
+    )]
+    scheme: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct AddAliasRequest {
+    #[schemars(description = "The canonical project slug that documents are grouped under.")]
+    project: String,
+    #[schemars(
+        description = "Another name that should resolve to it, for example openlv for open-lavatory."
+    )]
+    alias: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -53,6 +113,10 @@ struct ReadResult {
     revision: Option<i64>,
     view: View,
     content: String,
+    /// Questions the document asks and what the reader decided. A sibling of
+    /// content, not appended to it, so every view stays a pure projection and
+    /// an unanswered question is unambiguously null.
+    questions: Vec<serde_json::Value>,
 }
 
 struct PlanServer {
@@ -111,6 +175,26 @@ fn tool_error(message: String) -> ErrorData {
     ErrorData::invalid_params(message, None)
 }
 
+/// Read each declared file from disk. This grants no capability the agent did
+/// not already have, and failing here gives a clear local message instead of a
+/// 422 from the server.
+fn read_files(files: Vec<PushFile>) -> Result<Vec<api::FilePart>, ErrorData> {
+    if !files.iter().any(|file| file.path == "index.html") {
+        return Err(tool_error("one file must be index.html".to_string()));
+    }
+    files
+        .into_iter()
+        .map(|file| {
+            let bytes = std::fs::read(&file.source)
+                .map_err(|error| tool_error(format!("cannot read {}: {error}", file.source)))?;
+            Ok(api::FilePart {
+                path: file.path,
+                bytes,
+            })
+        })
+        .collect()
+}
+
 fn json<T: Serialize>(value: &T) -> Result<String, ErrorData> {
     serde_json::to_string_pretty(value)
         .map_err(|_| ErrorData::internal_error("cannot serialize tool result", None))
@@ -119,7 +203,7 @@ fn json<T: Serialize>(value: &T) -> Result<String, ErrorData> {
 #[tool_router(server_handler)]
 impl PlanServer {
     #[tool(
-        description = "Upload a complete HTML plan. Reusing a slug appends a revision at the same document URL."
+        description = "Upload an HTML plan, optionally with assets, a project, tags and questions for the reader to answer. Reusing a slug appends a revision at the same document URL."
     )]
     async fn plan_push(
         &self,
@@ -128,12 +212,99 @@ impl PlanServer {
         if !valid_slug(&request.slug) {
             return Err(tool_error("slug must match [a-z0-9-]{1,64}".to_string()));
         }
+
+        // html and files are two ways to say the same thing, so supplying both
+        // is a mistake rather than a precedence question
+        let files = match (request.html, request.files) {
+            (Some(_), Some(_)) => {
+                return Err(tool_error(
+                    "supply either html or files, not both".to_string(),
+                ));
+            }
+            (Some(html), None) => vec![api::FilePart {
+                path: "index.html".to_string(),
+                bytes: html.into_bytes(),
+            }],
+            (None, Some(files)) => read_files(files)?,
+            (None, None) => return Err(tool_error("supply html or files".to_string())),
+        };
+
+        let mut meta = serde_json::Map::new();
+        if let Some(title) = request.title {
+            meta.insert("title".to_string(), title.into());
+        }
+        if let Some(project) = request.project {
+            meta.insert("project".to_string(), project.into());
+        }
+        if let Some(tags) = request.tags {
+            meta.insert("tags".to_string(), tags.into());
+        }
+        if let Some(questions) = request.questions {
+            meta.insert("questions".to_string(), questions);
+        }
+
         let pushed = self
             .api
-            .push(&request.slug, request.html, request.title)
+            .push(&request.slug, meta.into(), files)
             .await
             .map_err(tool_error)?;
         json(&pushed)
+    }
+
+    #[tool(
+        description = "List projects with their aliases, document counts and whether an icon is set. Call this before pushing so a document joins an existing project instead of starting a near-duplicate. A project with no icon is worth offering to set one for with plan_set_project_icon."
+    )]
+    async fn plan_projects(&self) -> Result<String, ErrorData> {
+        json(&self.api.projects().await.map_err(tool_error)?)
+    }
+
+    #[tool(
+        description = "Metadata for a project's most recent documents, newest first. Use this to catch up on a project, then plan_read the ones that matter."
+    )]
+    async fn plan_project_documents(
+        &self,
+        Parameters(request): Parameters<ProjectDocumentsRequest>,
+    ) -> Result<String, ErrorData> {
+        let documents = self
+            .api
+            .list(Some(&request.project), Some(request.limit.unwrap_or(10)))
+            .await
+            .map_err(tool_error)?;
+        json(&documents)
+    }
+
+    #[tool(
+        description = "Set a project's icon from a local image file. Every document in the project then serves it, so the reader's browser tab says which project they are looking at. Upload a light and a dark variant."
+    )]
+    async fn plan_set_project_icon(
+        &self,
+        Parameters(request): Parameters<SetFaviconRequest>,
+    ) -> Result<String, ErrorData> {
+        let scheme = request.scheme.unwrap_or_else(|| "light".to_string());
+        if scheme != "light" && scheme != "dark" {
+            return Err(tool_error("scheme must be light or dark".to_string()));
+        }
+        let bytes = std::fs::read(&request.source)
+            .map_err(|error| tool_error(format!("cannot read {}: {error}", request.source)))?;
+        self.api
+            .set_favicon(&request.project, &scheme, bytes)
+            .await
+            .map_err(tool_error)?;
+        json(&serde_json::json!({ "project": request.project, "scheme": scheme }))
+    }
+
+    #[tool(
+        description = "Point another name at a project, so pushes naming either land in one place. Use when you notice two names for the same thing, such as openlv and open-lavatory."
+    )]
+    async fn plan_add_project_alias(
+        &self,
+        Parameters(request): Parameters<AddAliasRequest>,
+    ) -> Result<String, ErrorData> {
+        self.api
+            .add_alias(&request.project, &request.alias)
+            .await
+            .map_err(tool_error)?;
+        json(&serde_json::json!({ "project": request.project, "alias": request.alias }))
     }
 
     #[tool(
@@ -149,11 +320,18 @@ impl PlanServer {
         let view = request.view.unwrap_or_default();
         let html = self.api.raw(&slug, revision).await.map_err(tool_error)?;
         let projection = project(&html, view);
+        let questions = self
+            .api
+            .info(&slug)
+            .await
+            .map(|info| info.questions)
+            .unwrap_or_default();
         json(&ReadResult {
             slug,
             revision,
             view: projection.view,
             content: projection.content,
+            questions,
         })
     }
 
@@ -172,7 +350,7 @@ impl PlanServer {
         description = "List documents owned by the configured plan.env.md account, newest first."
     )]
     async fn plan_list(&self) -> Result<String, ErrorData> {
-        json(&self.api.list().await.map_err(tool_error)?)
+        json(&self.api.list(None, None).await.map_err(tool_error)?)
     }
 }
 

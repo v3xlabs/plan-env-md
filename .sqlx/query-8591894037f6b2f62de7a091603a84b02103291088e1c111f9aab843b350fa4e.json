@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tag as \"tag!: String\" FROM document_tags\n           WHERE document_id = ? ORDER BY tag",
+  "describe": {
+    "columns": [
+      {
+        "name": "tag!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8591894037f6b2f62de7a091603a84b02103291088e1c111f9aab843b350fa4e"
+}

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT favicon_light, favicon_light_type, favicon_dark, favicon_dark_type\n           FROM projects WHERE owner_id = ? AND slug = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "favicon_light",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "favicon_light_type",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "favicon_dark",
+        "ordinal": 2,
+        "type_info": "Blob"
+      },
+      {
+        "name": "favicon_dark_type",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5fe2ced1053ba0780a20b883284bc586f6195dcef78d62ee590a83f3575fdc10"
+}

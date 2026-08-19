@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.image as \"image!: Vec<u8>\", p.content_type as \"content_type!: String\"\n               FROM revision_previews p\n               JOIN revisions r ON r.id = p.revision_id\n               JOIN documents d ON d.id = r.document_id\n               WHERE d.owner_id = ? AND d.slug = ? AND p.scheme = ? AND p.status = 'ready'\n                 AND r.revision = COALESCE(?, (SELECT MAX(revision) FROM revisions\n                                               WHERE document_id = d.id))",
+  "describe": {
+    "columns": [
+      {
+        "name": "image!: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "content_type!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "93431a726567d8311dc5ec332fc4f4cb5a0b2b3dcf1ae527584cc1dca723a5ad"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE documents\n               SET title = COALESCE(?, title), project = COALESCE(?, project),\n                   updated_at = datetime('now')\n               WHERE owner_id = ? AND slug = ?\n               RETURNING id as \"id!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e8761e2f4b4e262f242d1d9fef96827283795d5e325b0391e93a86f4d9adb04e"
+}

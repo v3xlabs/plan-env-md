@@ -16,6 +16,7 @@
         "clsx": "^2.1.1",
         "date-fns": "^4.4.0",
         "openapi-hooks": "^0.1.1",
+        "solid-icons": "^1.2.0",
         "solid-js": "^1.9.14"
     },
     "devDependencies": {

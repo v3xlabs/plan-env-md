@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT revision as \"revision!: i64\", size_bytes as \"size_bytes!: i64\",\n                      created_at as \"created_at!: String\"\n               FROM revisions WHERE document_id = ? ORDER BY revision",
+  "query": "SELECT revision as \"revision!: i64\", size_bytes as \"size_bytes!: i64\",\n                  created_at as \"created_at!: String\"\n           FROM revisions WHERE document_id = ? ORDER BY revision",
   "describe": {
     "columns": [
       {
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "fe912a1e080360ee86af561c0110205faffb870e48bf9d8e4ec20c75417a3b8a"
+  "hash": "237d5f262a58a29151675d601fc79dedf05d859ee93462ff78c01d4a0690a1e3"
 }

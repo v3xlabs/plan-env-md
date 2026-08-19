@@ -41,6 +41,13 @@ const RootLayout = () => {
                 Documents
               </Link>
               <Link
+                to="/projects"
+                class="text-muted hover:text-ink"
+                activeProps={{ class: "text-ink font-medium" }}
+              >
+                Projects
+              </Link>
+              <Link
                 to="/tokens"
                 class="text-muted hover:text-ink"
                 activeProps={{ class: "text-ink font-medium" }}

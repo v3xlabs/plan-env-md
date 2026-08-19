@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE revision_previews\n                 SET status = CASE WHEN attempts >= ? THEN 'failed' ELSE 'pending' END,\n                     error = ?, updated_at = datetime('now')\n                 WHERE revision_id = ? AND scheme = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8288fad03cac63e4d5eba1f4a41a2bf2931e285a7421e0c54d82657c2d2cca96"
+}

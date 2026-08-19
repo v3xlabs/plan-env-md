@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key as \"key!: String\", selected as \"selected!: String\",\n                  other_text, notes, answered_at as \"answered_at!: String\"\n           FROM document_answers WHERE document_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "key!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "selected!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "other_text",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "notes",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "answered_at!: String",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "59866314c760644e261bda48f030264a16fda83f4d47f10ff2a697e6b9675924"
+}

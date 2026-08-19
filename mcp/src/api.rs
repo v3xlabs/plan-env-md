@@ -28,11 +28,15 @@ pub struct DocumentInfo {
     pub id: String,
     pub slug: String,
     pub title: Option<String>,
+    pub project: Option<String>,
+    pub tags: Vec<String>,
     pub published: bool,
     pub created_at: String,
     pub updated_at: String,
     pub url: String,
     pub revisions: Vec<Revision>,
+    /// What the latest revision asks, and what the owner answered
+    pub questions: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -40,13 +44,35 @@ pub struct DocumentSummary {
     pub id: String,
     pub slug: String,
     pub title: Option<String>,
+    pub project: Option<String>,
+    pub tags: Vec<String>,
     pub published: bool,
     pub revision_count: i64,
     pub latest_revision: i64,
+    pub questions_total: i64,
+    pub questions_answered: i64,
     pub last_pushed_at: String,
     pub created_at: String,
     pub updated_at: String,
     pub url: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ProjectSummary {
+    pub slug: String,
+    pub aliases: Vec<String>,
+    pub document_count: i64,
+    pub last_pushed_at: Option<String>,
+    pub has_favicon_light: bool,
+    pub has_favicon_dark: bool,
+}
+
+/// One file of a revision, read from disk by this server rather than passed
+/// through the model: the agent already wrote them, and base64 in a tool
+/// argument is bloat with no upside.
+pub struct FilePart {
+    pub path: String,
+    pub bytes: Vec<u8>,
 }
 
 impl Api {
@@ -88,21 +114,24 @@ impl Api {
         Err(message)
     }
 
+    /// Metadata rides in a JSON `meta` part and each file in a part named after
+    /// its path, which is the one shape the server accepts for anything richer
+    /// than a bare document.
     pub async fn push(
         &self,
         slug: &str,
-        html: String,
-        title: Option<String>,
+        meta: serde_json::Value,
+        files: Vec<FilePart>,
     ) -> Result<PushedDocument, String> {
-        let mut url = self.endpoint(&format!("api/docs/{slug}"))?;
-        if let Some(title) = title {
-            url.query_pairs_mut().append_pair("title", &title);
+        let mut form = reqwest::multipart::Form::new().text("meta", meta.to_string());
+        for file in files {
+            let part = reqwest::multipart::Part::bytes(file.bytes).file_name(file.path.clone());
+            form = form.part(file.path, part);
         }
         let response = self
             .client
-            .put(url)
-            .header(reqwest::header::CONTENT_TYPE, "text/html")
-            .body(html)
+            .put(self.endpoint(&format!("api/docs/{slug}"))?)
+            .multipart(form)
             .send()
             .await
             .map_err(|_| "cannot reach plan.env.md".to_string())?;
@@ -127,10 +156,26 @@ impl Api {
             .map_err(|_| "plan.env.md returned invalid document metadata".to_string())
     }
 
-    pub async fn list(&self) -> Result<Vec<DocumentSummary>, String> {
+    pub async fn list(
+        &self,
+        project: Option<&str>,
+        limit: Option<i64>,
+    ) -> Result<Vec<DocumentSummary>, String> {
+        let mut url = self.endpoint("api/docs")?;
+        // query_pairs_mut leaves a bare "?" behind even when nothing is
+        // appended, so it is only taken when there is something to add
+        if project.is_some() || limit.is_some() {
+            let mut query = url.query_pairs_mut();
+            if let Some(project) = project {
+                query.append_pair("project", project);
+            }
+            if let Some(limit) = limit {
+                query.append_pair("limit", &limit.to_string());
+            }
+        }
         let response = self
             .client
-            .get(self.endpoint("api/docs")?)
+            .get(url)
             .send()
             .await
             .map_err(|_| "cannot reach plan.env.md".to_string())?;
@@ -139,6 +184,49 @@ impl Api {
             .json()
             .await
             .map_err(|_| "plan.env.md returned an invalid document list".to_string())
+    }
+
+    pub async fn projects(&self) -> Result<Vec<ProjectSummary>, String> {
+        let response = self
+            .client
+            .get(self.endpoint("api/projects")?)
+            .send()
+            .await
+            .map_err(|_| "cannot reach plan.env.md".to_string())?;
+        self.checked(response)
+            .await?
+            .json()
+            .await
+            .map_err(|_| "plan.env.md returned an invalid project list".to_string())
+    }
+
+    pub async fn set_favicon(
+        &self,
+        project: &str,
+        scheme: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        let mut url = self.endpoint(&format!("api/projects/{project}/favicon"))?;
+        url.query_pairs_mut().append_pair("scheme", scheme);
+        let response = self
+            .client
+            .put(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|_| "cannot reach plan.env.md".to_string())?;
+        self.checked(response).await.map(|_| ())
+    }
+
+    pub async fn add_alias(&self, project: &str, alias: &str) -> Result<(), String> {
+        let response = self
+            .client
+            .put(self.endpoint(&format!("api/projects/{project}/aliases/{alias}"))?)
+            .send()
+            .await
+            .map_err(|_| "cannot reach plan.env.md".to_string())?;
+        self.checked(response).await.map(|_| ())
     }
 
     pub async fn raw(&self, slug: &str, revision: Option<i64>) -> Result<String, String> {
@@ -180,7 +268,12 @@ mod tests {
         let base_url = Url::parse(&format!("http://{address}/")).expect("URL");
         let api = Api::new(base_url, "private-token".to_string()).expect("API");
 
-        assert!(api.list().await.expect("document list").is_empty());
+        assert!(
+            api.list(None, None)
+                .await
+                .expect("document list")
+                .is_empty()
+        );
         let request = server.await.expect("server task");
         assert!(request.starts_with("GET /api/docs HTTP/1.1\r\n"));
         assert!(request.contains("authorization: Bearer private-token\r\n"));

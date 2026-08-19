@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE revision_previews SET status = 'pending'\n             WHERE status = 'running' AND attempts < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fdfefc2e68c21b0e072afa940d7890c9dd861bbda250ddb2549d937bd7f276b7"
+}

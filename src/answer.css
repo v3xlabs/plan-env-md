@@ -1,0 +1,193 @@
+/* In-document answer widget. Every rule is scoped under a planenv- class so it
+   cannot reach the document's own markup, and every value is self-contained so
+   it does not inherit the document's theme by accident. */
+
+.planenv-q {
+  --pq-bg: #fbfaf8;
+  --pq-panel: #ffffff;
+  --pq-ink: #1f2024;
+  --pq-soft: #5a5c63;
+  --pq-faint: #8b8d94;
+  --pq-rule: #ddd9d2;
+  --pq-accent: #196d59;
+  --pq-accent-soft: #196d5914;
+
+  display: block;
+  margin: 1.25rem 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--pq-rule);
+  border-left: 3px solid var(--pq-accent);
+  border-radius: 8px;
+  background: var(--pq-panel);
+  color: var(--pq-ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  box-shadow: 0 1px 2px #0000000d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .planenv-q {
+    --pq-bg: #14151a;
+    --pq-panel: #1b1d24;
+    --pq-ink: #e6e6e4;
+    --pq-soft: #a2a5ad;
+    --pq-faint: #71747d;
+    --pq-rule: #34383d;
+    --pq-accent: #4cc2a0;
+    --pq-accent-soft: #4cc2a022;
+    box-shadow: none;
+  }
+}
+
+.planenv-q * { box-sizing: border-box; }
+
+.planenv-q > header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.15rem;
+}
+
+.planenv-q-key {
+  flex: none;
+  font: 500 10px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pq-accent);
+  background: var(--pq-accent-soft);
+  border-radius: 3px;
+  padding: 0.1em 0.45em;
+}
+
+.planenv-q-prompt { font-weight: 600; }
+
+.planenv-q-detail {
+  margin: 0.2rem 0 0.7rem;
+  color: var(--pq-soft);
+  font-size: 13px;
+}
+
+.planenv-opts { display: grid; gap: 1px; }
+
+.planenv-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border-radius: 6px;
+  padding: 0.1rem;
+}
+
+.planenv-opt.is-on { background: var(--pq-accent-soft); }
+
+.planenv-pick {
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 0.55rem;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planenv-pick:hover { background: #8b8d9414; }
+.planenv-pick small { grid-column: 2; color: var(--pq-faint); font-size: 12px; }
+
+.planenv-mark {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--pq-faint);
+  border-radius: 50%;
+  align-self: center;
+  position: relative;
+}
+
+.planenv-mark.is-box { border-radius: 3px; }
+.planenv-mark.is-ghost { border-style: dashed; }
+
+.planenv-opt.is-on .planenv-mark {
+  border-color: var(--pq-accent);
+  background: var(--pq-accent);
+  box-shadow: inset 0 0 0 2.5px var(--pq-panel);
+}
+
+.planenv-ghost .planenv-label { color: var(--pq-faint); font-style: italic; }
+.planenv-ghost.is-on { padding: 0.4rem 0.5rem; gap: 0.55rem; align-items: center; }
+
+.planenv-note-btn {
+  flex: none;
+  align-self: center;
+  border: 0;
+  background: none;
+  border-radius: 4px;
+  padding: 0.25rem 0.4rem;
+  color: var(--pq-faint);
+  font: 500 11px/1 system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.planenv-opt:hover .planenv-note-btn,
+.planenv-note-btn:focus-visible { opacity: 1; }
+.planenv-note-btn:hover { color: var(--pq-accent); background: var(--pq-accent-soft); }
+
+.planenv-other,
+.planenv-notes {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid var(--pq-rule);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  background: var(--pq-bg);
+  color: var(--pq-ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.planenv-notes { margin-top: 0.5rem; }
+.planenv-other:focus, .planenv-notes:focus { outline: 2px solid var(--pq-accent); outline-offset: -1px; }
+
+.planenv-q > footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.6rem;
+  font: 500 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  color: var(--pq-faint);
+}
+
+.planenv-clear {
+  border: 0;
+  background: none;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  color: var(--pq-faint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.planenv-clear:hover { color: var(--pq-ink); background: #8b8d9414; }
+
+/* the panel holds unanchored questions; it shares the inline cards' edges so
+   the two do not read as different widths */
+#planenv-panel { margin: 2.5rem 0 0; }
+
+#planenv-panel > h2 {
+  font: 500 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b8d94;
+}
+
+@media print {
+  .planenv-q, #planenv-panel { display: none; }
+}

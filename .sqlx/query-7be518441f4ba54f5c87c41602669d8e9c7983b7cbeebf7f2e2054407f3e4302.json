@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO documents (public_id, owner_id, slug, title, project)\n                         VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "7be518441f4ba54f5c87c41602669d8e9c7983b7cbeebf7f2e2054407f3e4302"
+}

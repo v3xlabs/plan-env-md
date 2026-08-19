@@ -57,7 +57,7 @@ async fn check_bearer(req: &Request, bearer: Bearer) -> Option<AuthUser> {
 }
 
 async fn check_session(req: &Request, api_key: ApiKey) -> Option<AuthUser> {
-    lookup_session(req.data::<SqlitePool>()?, &api_key.key).await
+    session_user(req.data::<SqlitePool>()?, &api_key.key).await
 }
 
 async fn lookup_bearer(pool: &SqlitePool, token: &str) -> Option<AuthUser> {
@@ -88,7 +88,7 @@ async fn lookup_bearer(pool: &SqlitePool, token: &str) -> Option<AuthUser> {
     })
 }
 
-async fn lookup_session(pool: &SqlitePool, key: &str) -> Option<AuthUser> {
+pub async fn session_user(pool: &SqlitePool, key: &str) -> Option<AuthUser> {
     let hash = sha256(key);
     let row = sqlx::query!(
         r#"SELECT u.id as "id!: i64", u.username as "username!: String", u.is_admin as "is_admin!: bool"
@@ -118,7 +118,7 @@ pub async fn user_from_request(pool: &SqlitePool, req: &Request) -> Option<AuthU
         return lookup_bearer(pool, token).await;
     }
     let key = req.cookie().get(SESSION_COOKIE)?.value_str().to_string();
-    lookup_session(pool, &key).await
+    session_user(pool, &key).await
 }
 
 pub async fn create_session(pool: &SqlitePool, user_id: i64) -> Result<String, sqlx::Error> {

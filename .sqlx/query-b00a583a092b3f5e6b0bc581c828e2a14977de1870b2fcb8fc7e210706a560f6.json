@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT project as \"project!: String\" FROM project_aliases\n           WHERE owner_id = ? AND alias = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "project!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b00a583a092b3f5e6b0bc581c828e2a14977de1870b2fcb8fc7e210706a560f6"
+}

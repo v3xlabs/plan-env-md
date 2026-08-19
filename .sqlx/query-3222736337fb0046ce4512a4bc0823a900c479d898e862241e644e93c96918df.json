@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE revision_previews\n           SET status = 'running', attempts = attempts + 1, updated_at = datetime('now')\n           WHERE rowid = (SELECT rowid FROM revision_previews\n                          WHERE status = 'pending' ORDER BY revision_id LIMIT 1)\n           RETURNING revision_id as \"revision_id!: i64\", scheme as \"scheme!: String\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "revision_id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheme!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "3222736337fb0046ce4512a4bc0823a900c479d898e862241e644e93c96918df"
+}

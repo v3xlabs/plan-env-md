@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["multipart", "json", "rustls"] }
 rmcp = { version = "3.1.3", features = ["server", "macros", "transport-io", "schemars"] }
 rustls = "0.23"
 scraper = "0.27.0"

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT t.document_id as \"document_id!: i64\", t.tag as \"tag!: String\"\n           FROM document_tags t JOIN documents d ON d.id = t.document_id\n           WHERE d.owner_id = ?\n           ORDER BY t.tag",
+  "describe": {
+    "columns": [
+      {
+        "name": "document_id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "tag!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "745f95212afddd82243dbf107aac4804599da95ee70e920af96fc4d82c1abb88"
+}

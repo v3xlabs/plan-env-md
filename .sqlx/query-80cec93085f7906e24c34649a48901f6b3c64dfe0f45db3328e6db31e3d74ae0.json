@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO revision_questions (revision_id, ord, key, data) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "80cec93085f7906e24c34649a48901f6b3c64dfe0f45db3328e6db31e3d74ae0"
+}

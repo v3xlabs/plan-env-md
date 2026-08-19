@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT q.data as \"data!: String\"\n           FROM revision_questions q JOIN revisions r ON r.id = q.revision_id\n           WHERE r.document_id = ?\n             AND r.revision = COALESCE(?, (SELECT MAX(revision) FROM revisions WHERE document_id = ?))\n           ORDER BY q.ord",
+  "describe": {
+    "columns": [
+      {
+        "name": "data!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cfa23f79cc3f7be203613b503c598258a3e15df56e80b8989558f3ca3f43677b"
+}

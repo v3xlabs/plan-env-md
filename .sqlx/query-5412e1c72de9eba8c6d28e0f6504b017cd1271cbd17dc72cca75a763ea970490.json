@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE documents\n                     SET updated_at = datetime('now'), title = COALESCE(?, title),\n                         project = COALESCE(?, project)\n                     WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5412e1c72de9eba8c6d28e0f6504b017cd1271cbd17dc72cca75a763ea970490"
+}

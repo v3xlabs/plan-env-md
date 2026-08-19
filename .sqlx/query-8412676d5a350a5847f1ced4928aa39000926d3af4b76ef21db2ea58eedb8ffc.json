@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE projects SET favicon_dark = ?, favicon_dark_type = ?\n                 WHERE owner_id = ? AND slug = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8412676d5a350a5847f1ced4928aa39000926d3af4b76ef21db2ea58eedb8ffc"
+}

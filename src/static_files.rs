@@ -30,6 +30,22 @@ pub fn serve_or_index(path: &str) -> Response {
     }
 }
 
+/// The answer widget, compiled in and served outside the SPA bundle so the
+/// sandboxed document can load it as an ordinary subresource.
+#[handler]
+pub fn answer_asset(Path(name): Path<String>) -> Response {
+    let (body, content_type) = match name.as_str() {
+        "answer.js" => (include_str!("answer.js"), "text/javascript; charset=utf-8"),
+        "answer.css" => (include_str!("answer.css"), "text/css; charset=utf-8"),
+        _ => return Response::builder().status(StatusCode::NOT_FOUND).finish(),
+    };
+    Response::builder()
+        .content_type(content_type)
+        .header(header::CACHE_CONTROL, "no-cache")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .body(body)
+}
+
 pub fn index_response() -> Response {
     file_response("index.html")
 }

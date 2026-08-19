@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO revision_previews (revision_id, scheme, status)\n             VALUES (?, ?, 'pending')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f4d497cc02da7997b365e95016f109708570229f9fc3e6dc5d230e72e248ab1a"
+}

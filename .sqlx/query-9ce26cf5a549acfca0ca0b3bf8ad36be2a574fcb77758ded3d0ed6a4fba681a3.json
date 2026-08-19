@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO document_answers (document_id, key, selected, other_text, notes)\n               VALUES (?, ?, ?, ?, ?)\n               ON CONFLICT (document_id, key) DO UPDATE SET\n                 selected = excluded.selected,\n                 other_text = excluded.other_text,\n                 notes = excluded.notes,\n                 answered_at = datetime('now')\n               RETURNING answered_at as \"answered_at!: String\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "answered_at!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9ce26cf5a549acfca0ca0b3bf8ad36be2a574fcb77758ded3d0ed6a4fba681a3"
+}

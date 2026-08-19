@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO revision_files (revision_id, path, content, content_type, size_bytes)\n                 VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "6df9d72ef4e0da0b274661ba8e3b5ae90dd8a18abc0ac6408ee06669e1d06f99"
+}

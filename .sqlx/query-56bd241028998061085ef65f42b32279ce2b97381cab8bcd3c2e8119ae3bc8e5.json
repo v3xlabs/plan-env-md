@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: i64\", public_id as \"public_id!: String\", title,\n                      published as \"published!: bool\",\n                      created_at as \"created_at!: String\", updated_at as \"updated_at!: String\"\n               FROM documents WHERE owner_id = ? AND slug = ?",
+  "query": "SELECT id as \"id!: i64\", public_id as \"public_id!: String\", title, project,\n                  published as \"published!: bool\",\n                  created_at as \"created_at!: String\", updated_at as \"updated_at!: String\"\n           FROM documents WHERE owner_id = ? AND slug = ?",
   "describe": {
     "columns": [
       {
@@ -19,18 +19,23 @@
         "type_info": "Text"
       },
       {
-        "name": "published!: bool",
+        "name": "project",
         "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "published!: bool",
+        "ordinal": 4,
         "type_info": "Integer"
       },
       {
         "name": "created_at!: String",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text"
       },
       {
         "name": "updated_at!: String",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text"
       }
     ],
@@ -41,10 +46,11 @@
       true,
       false,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "38e43e37338c4c86104a7e3750651bf36bdc99417608ff33c72ff5998e45cee8"
+  "hash": "56bd241028998061085ef65f42b32279ce2b97381cab8bcd3c2e8119ae3bc8e5"
 }

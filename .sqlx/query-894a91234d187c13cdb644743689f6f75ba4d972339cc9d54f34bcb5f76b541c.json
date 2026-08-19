@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO projects (owner_id, slug) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "894a91234d187c13cdb644743689f6f75ba4d972339cc9d54f34bcb5f76b541c"
+}

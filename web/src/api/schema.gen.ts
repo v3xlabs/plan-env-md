@@ -458,6 +458,228 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Your projects, newest activity first. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["ProjectBody"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project}/aliases/{alias}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Point another name at this project. A push naming the alias lands in the
+         *     project, so `openlv` and `open-lavatory` do not become two piles.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project: string;
+                    alias: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The alias is already a project of its own, or points somewhere else */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+                /** @description Not a valid slug shape */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Stop resolving this name. Documents already in the project stay put. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project: string;
+                    alias: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The alias is already a project of its own, or points somewhere else */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+                /** @description Not a valid slug shape */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project}/favicon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A project's favicon. Owner only, like everything else about a document. */
+        get: {
+            parameters: {
+                query?: {
+                    scheme?: components["schemas"]["Scheme"];
+                };
+                header?: never;
+                path: {
+                    project: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        "CONTENT-TYPE": string;
+                        "CACHE-CONTROL": string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description No such project, or no favicon in this colour scheme */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Upload a project favicon. Every document in the project then serves it,
+         *     so a reader's tab says which project they are looking at.
+         */
+        put: {
+            parameters: {
+                query?: {
+                    scheme?: components["schemas"]["Scheme"];
+                };
+                header?: never;
+                path: {
+                    project: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            responses: {
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No project of this name on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not an accepted image type, or larger than 64KB */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docs/{slug}": {
         parameters: {
             query?: never;
@@ -513,6 +735,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "text/html": string;
+                    "multipart/form-data": string;
                 };
             };
             responses: {
@@ -539,7 +762,51 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Correct a document's title, project or tags without pushing a revision.
+         *     This is how documents pushed before projects existed get sorted.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["PatchRequest"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["DocumentDetailBody"];
+                    };
+                };
+                /** @description No document with this slug on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Project or a tag does not fit its shape */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/api/docs": {
@@ -552,7 +819,12 @@ export interface paths {
         /** List your documents. */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Restrict to one project. An alias resolves to the project it names. */
+                    project?: string;
+                    /** @description Newest first; useful for reading only the last few of a project. */
+                    limit?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -732,6 +1004,223 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/docs/{slug}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A revision's thumbnail. Owner only, and never referenced from the public
+         *     URL: a thumbnail past the password gate would undo the gate.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    scheme?: components["schemas"]["Scheme"];
+                    revision?: number;
+                };
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        "CONTENT-TYPE": string;
+                        "CACHE-CONTROL": string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description No such revision, or its thumbnail is not rendered yet */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docs/{slug}/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest revision's questions, each with the owner's answer or null. */
+        get: {
+            parameters: {
+                query?: {
+                    revision?: number;
+                };
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["AnsweredQuestion"][];
+                    };
+                };
+                /** @description No document with this slug on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docs/{slug}/answers/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record one answer. Accepts a browser session or a scoped answer key,
+         *     never a normal API token.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slug: string;
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["AnswerRequest"];
+                };
+            };
+            responses: {
+                200: {
+                    headers: {
+                        "ACCESS-CONTROL-ALLOW-ORIGIN": string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json; charset=utf-8": components["schemas"]["Answer"];
+                    };
+                };
+                /** @description No such document, or the latest revision does not ask this question */
+                404: {
+                    headers: {
+                        "ACCESS-CONTROL-ALLOW-ORIGIN": string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The answer does not fit the question that was asked */
+                422: {
+                    headers: {
+                        "ACCESS-CONTROL-ALLOW-ORIGIN": string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain; charset=utf-8": string;
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Withdraw an answer, returning the question to unanswered. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slug: string;
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                204: {
+                    headers: {
+                        "ACCESS-CONTROL-ALLOW-ORIGIN": string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                404: {
+                    headers: {
+                        "ACCESS-CONTROL-ALLOW-ORIGIN": string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * CORS preflight for the two answer routes. The widget calls from the
+         *     document's opaque origin, which presents `Origin: null`.
+         */
+        options: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    _slug: string;
+                    _key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                204: {
+                    headers: {
+                        "ACCESS-CONTROL-ALLOW-ORIGIN": string;
+                        "ACCESS-CONTROL-ALLOW-HEADERS": string;
+                        "ACCESS-CONTROL-ALLOW-METHODS": string;
+                        "ACCESS-CONTROL-MAX-AGE": string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docs/{slug}/unpublish": {
         parameters: {
             query?: never;
@@ -778,6 +1267,36 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Answer */
+        Answer: {
+            selected: string[];
+            other_text?: string;
+            notes?: string;
+            answered_at: string;
+        };
+        /** AnswerRequest */
+        AnswerRequest: {
+            /** @description Declared option values, or the reserved `other` for a written answer. */
+            selected: string[];
+            other_text?: string;
+            notes?: string;
+        };
+        /**
+         * AnsweredQuestion
+         * @description A question with whatever the owner decided about it. One shape for the
+         *     widget, the SPA and the MCP tool.
+         */
+        AnsweredQuestion: {
+            /** @description Stable across revisions; an answer is keyed by this, not by revision. */
+            key: string;
+            prompt: string;
+            detail?: string;
+            /** @description An element id in the document; the widget places the card after it. */
+            anchor?: string;
+            multiple: boolean;
+            options: components["schemas"]["QuestionOption"][];
+            answer?: components["schemas"]["Answer"];
+        };
         /** CreateTokenRequest */
         CreateTokenRequest: {
             name: string;
@@ -795,11 +1314,20 @@ export interface components {
             id: string;
             slug: string;
             title?: string;
+            project?: string;
+            tags: string[];
             published: boolean;
             /** Format: int64 */
             revision_count: number;
             /** Format: int64 */
             latest_revision: number;
+            /**
+             * Format: int64
+             * @description Questions the latest revision asks, and how many carry an answer
+             */
+            questions_total: number;
+            /** Format: int64 */
+            questions_answered: number;
             /** @description When the newest revision was pushed; the list sorts by this */
             last_pushed_at: string;
             created_at: string;
@@ -811,11 +1339,14 @@ export interface components {
             id: string;
             slug: string;
             title?: string;
+            project?: string;
+            tags: string[];
             published: boolean;
             created_at: string;
             updated_at: string;
             url: string;
             revisions: components["schemas"]["RevisionBody"][];
+            questions: components["schemas"]["AnsweredQuestion"][];
         };
         /** InviteBody */
         InviteBody: {
@@ -830,6 +1361,29 @@ export interface components {
         LoginRequest: {
             username: string;
             password: string;
+        };
+        /**
+         * PatchRequest
+         * @description Fields a document owner may correct after the fact. Omitted leaves the
+         *     stored value alone, which is what makes "no backfill" workable for the
+         *     documents pushed before projects existed.
+         */
+        PatchRequest: {
+            title?: string;
+            project?: string;
+            tags?: string[];
+        };
+        /** ProjectBody */
+        ProjectBody: {
+            slug: string;
+            /** @description Other names that resolve to this project on push */
+            aliases: string[];
+            /** Format: int64 */
+            document_count: number;
+            /** @description Newest push in the project, so the list can sort by activity */
+            last_pushed_at?: string;
+            has_favicon_light: boolean;
+            has_favicon_dark: boolean;
         };
         /** PublishRequest */
         PublishRequest: {
@@ -850,6 +1404,12 @@ export interface components {
             size_bytes: number;
             url: string;
         };
+        /** QuestionOption */
+        QuestionOption: {
+            value: string;
+            label: string;
+            detail?: string;
+        };
         /** RegisterRequest */
         RegisterRequest: {
             username: string;
@@ -864,6 +1424,8 @@ export interface components {
             size_bytes: number;
             created_at: string;
         };
+        /** @enum {string} */
+        Scheme: "light" | "dark";
         /** TokenBody */
         TokenBody: {
             /** Format: int64 */

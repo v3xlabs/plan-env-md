@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT content as \"content!: Vec<u8>\", content_type as \"content_type!: String\"\n           FROM revision_files WHERE revision_id = ? AND path = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "content!: Vec<u8>",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "content_type!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "3275dd42c7c92e819a2f9146313e8940c368e1ef4e4add7e838d5dba0709cb21"
+}

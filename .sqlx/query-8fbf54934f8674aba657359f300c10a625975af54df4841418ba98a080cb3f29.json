@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO revisions (document_id, revision, size_bytes)\n               SELECT ?, COALESCE(MAX(revision), 0) + 1, ? FROM revisions WHERE document_id = ?\n               RETURNING id as \"id!: i64\", revision as \"revision!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "revision!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "8fbf54934f8674aba657359f300c10a625975af54df4841418ba98a080cb3f29"
+}

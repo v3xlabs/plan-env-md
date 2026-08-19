@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM project_aliases WHERE owner_id = ? AND alias = ? AND project = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "0ac2dcc470b8b5b5311d6f6777fd6e1def027ba151d9ab25339059c2bff0f098"
+}

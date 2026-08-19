@@ -324,6 +324,281 @@
         ]
       }
     },
+    "/api/projects": {
+      "get": {
+        "summary": "Your projects, newest activity first.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectBody"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/projects/{project}/aliases/{alias}": {
+      "put": {
+        "summary": "Point another name at this project. A push naming the alias lands in the\nproject, so `openlv` and `open-lavatory` do not become two piles.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "alias",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "409": {
+            "description": "The alias is already a project of its own, or points somewhere else",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a valid slug shape",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Stop resolving this name. Documents already in the project stay put.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "alias",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "409": {
+            "description": "The alias is already a project of its own, or points somewhere else",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a valid slug shape",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/projects/{project}/favicon": {
+      "get": {
+        "summary": "A project's favicon. Owner only, like everything else about a document.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "scheme",
+            "schema": {
+              "$ref": "#/components/schemas/Scheme"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "CONTENT-TYPE": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "CACHE-CONTROL": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project, or no favicon in this colour scheme"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Upload a project favicon. Every document in the project then serves it,\nso a reader's tab says which project they are looking at.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "scheme",
+            "schema": {
+              "$ref": "#/components/schemas/Scheme"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "422": {
+            "description": "Not an accepted image type, or larger than 64KB",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project of this name on this account"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/docs/{slug}": {
       "put": {
         "summary": "Push a document. The first push of a slug creates the document and\nmints its public id; every later push appends a revision at the same\nURL.",
@@ -352,6 +627,12 @@
         "requestBody": {
           "content": {
             "text/html": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "multipart/form-data": {
               "schema": {
                 "type": "string",
                 "format": "binary"
@@ -428,11 +709,94 @@
             "SessionAuth": []
           }
         ]
+      },
+      "patch": {
+        "summary": "Correct a document's title, project or tags without pushing a revision.\nThis is how documents pushed before projects existed get sorted.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDetailBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Project or a tag does not fit its shape",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No document with this slug on this account"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
       }
     },
     "/api/docs": {
       "get": {
         "summary": "List your documents.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "description": "Restrict to one project. An alias resolves to the project it names.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "in": "query",
+            "description": "Newest first; useful for reading only the last few of a project.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -652,6 +1016,338 @@
         ]
       }
     },
+    "/api/docs/{slug}/preview": {
+      "get": {
+        "summary": "A revision's thumbnail. Owner only, and never referenced from the public\nURL: a thumbnail past the password gate would undo the gate.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "scheme",
+            "schema": {
+              "$ref": "#/components/schemas/Scheme"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "revision",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "CONTENT-TYPE": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "CACHE-CONTROL": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such revision, or its thumbnail is not rendered yet"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/docs/{slug}/questions": {
+      "get": {
+        "summary": "The latest revision's questions, each with the owner's answer or null.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "revision",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AnsweredQuestion"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No document with this slug on this account"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/docs/{slug}/answers/{key}": {
+      "put": {
+        "summary": "Record one answer. Accepts a browser session or a scoped answer key,\nnever a normal API token.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "key",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
+              }
+            },
+            "headers": {
+              "ACCESS-CONTROL-ALLOW-ORIGIN": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The answer does not fit the question that was asked",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "ACCESS-CONTROL-ALLOW-ORIGIN": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document, or the latest revision does not ask this question",
+            "headers": {
+              "ACCESS-CONTROL-ALLOW-ORIGIN": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Withdraw an answer, returning the question to unanswered.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "key",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "",
+            "headers": {
+              "ACCESS-CONTROL-ALLOW-ORIGIN": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "headers": {
+              "ACCESS-CONTROL-ALLOW-ORIGIN": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "options": {
+        "summary": "CORS preflight for the two answer routes. The widget calls from the\ndocument's opaque origin, which presents `Origin: null`.",
+        "parameters": [
+          {
+            "name": "_slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "_key",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "",
+            "headers": {
+              "ACCESS-CONTROL-ALLOW-ORIGIN": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ACCESS-CONTROL-ALLOW-HEADERS": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ACCESS-CONTROL-ALLOW-METHODS": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ACCESS-CONTROL-MAX-AGE": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/docs/{slug}/unpublish": {
       "post": {
         "summary": "Take the document off the public URL again.",
@@ -685,6 +1381,92 @@
   },
   "components": {
     "schemas": {
+      "Answer": {
+        "type": "object",
+        "title": "Answer",
+        "required": [
+          "selected",
+          "answered_at"
+        ],
+        "properties": {
+          "selected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "other_text": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "answered_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AnswerRequest": {
+        "type": "object",
+        "title": "AnswerRequest",
+        "required": [
+          "selected"
+        ],
+        "properties": {
+          "selected": {
+            "type": "array",
+            "description": "Declared option values, or the reserved `other` for a written answer.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "other_text": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "AnsweredQuestion": {
+        "type": "object",
+        "title": "AnsweredQuestion",
+        "description": "A question with whatever the owner decided about it. One shape for the\nwidget, the SPA and the MCP tool.",
+        "required": [
+          "key",
+          "prompt",
+          "multiple",
+          "options"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Stable across revisions; an answer is keyed by this, not by revision."
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "anchor": {
+            "type": "string",
+            "description": "An element id in the document; the widget places the card after it."
+          },
+          "multiple": {
+            "type": "boolean"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            }
+          },
+          "answer": {
+            "$ref": "#/components/schemas/Answer"
+          }
+        }
+      },
       "CreateTokenRequest": {
         "type": "object",
         "title": "CreateTokenRequest",
@@ -725,9 +1507,12 @@
         "required": [
           "id",
           "slug",
+          "tags",
           "published",
           "revision_count",
           "latest_revision",
+          "questions_total",
+          "questions_answered",
           "last_pushed_at",
           "created_at",
           "updated_at",
@@ -743,6 +1528,15 @@
           "title": {
             "type": "string"
           },
+          "project": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "published": {
             "type": "boolean"
           },
@@ -751,6 +1545,15 @@
             "format": "int64"
           },
           "latest_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "questions_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Questions the latest revision asks, and how many carry an answer"
+          },
+          "questions_answered": {
             "type": "integer",
             "format": "int64"
           },
@@ -775,11 +1578,13 @@
         "required": [
           "id",
           "slug",
+          "tags",
           "published",
           "created_at",
           "updated_at",
           "url",
-          "revisions"
+          "revisions",
+          "questions"
         ],
         "properties": {
           "id": {
@@ -790,6 +1595,15 @@
           },
           "title": {
             "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "published": {
             "type": "boolean"
@@ -807,6 +1621,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RevisionBody"
+            }
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnsweredQuestion"
             }
           }
         }
@@ -851,6 +1671,62 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "PatchRequest": {
+        "type": "object",
+        "title": "PatchRequest",
+        "description": "Fields a document owner may correct after the fact. Omitted leaves the\nstored value alone, which is what makes \"no backfill\" workable for the\ndocuments pushed before projects existed.",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ProjectBody": {
+        "type": "object",
+        "title": "ProjectBody",
+        "required": [
+          "slug",
+          "aliases",
+          "document_count",
+          "has_favicon_light",
+          "has_favicon_dark"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "description": "Other names that resolve to this project on push",
+            "items": {
+              "type": "string"
+            }
+          },
+          "document_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_pushed_at": {
+            "type": "string",
+            "description": "Newest push in the project, so the list can sort by activity"
+          },
+          "has_favicon_light": {
+            "type": "boolean"
+          },
+          "has_favicon_dark": {
+            "type": "boolean"
           }
         }
       },
@@ -909,6 +1785,25 @@
           }
         }
       },
+      "QuestionOption": {
+        "type": "object",
+        "title": "QuestionOption",
+        "required": [
+          "value",
+          "label"
+        ],
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "title": "RegisterRequest",
@@ -949,6 +1844,13 @@
             "type": "string"
           }
         }
+      },
+      "Scheme": {
+        "type": "string",
+        "enum": [
+          "light",
+          "dark"
+        ]
       },
       "TokenBody": {
         "type": "object",

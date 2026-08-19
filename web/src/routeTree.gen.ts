@@ -16,6 +16,8 @@ import { Route as AuthIndexRouteImport } from './routes/_auth.index'
 import { Route as AuthInvitesRouteImport } from './routes/_auth.invites'
 import { Route as AuthTokensRouteImport } from './routes/_auth.tokens'
 import { Route as AuthDocumentsSlugRouteImport } from './routes/_auth.documents.$slug'
+import { Route as AuthProjectsIndexRouteImport } from './routes/_auth.projects.index'
+import { Route as AuthProjectsProjectRouteImport } from './routes/_auth.projects.$project'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/_auth',
@@ -51,6 +53,16 @@ const AuthDocumentsSlugRoute = AuthDocumentsSlugRouteImport.update({
   path: '/documents/$slug',
   getParentRoute: () => AuthRoute,
 } as any)
+const AuthProjectsIndexRoute = AuthProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => AuthRoute,
+} as any)
+const AuthProjectsProjectRoute = AuthProjectsProjectRouteImport.update({
+  id: '/projects/$project',
+  path: '/projects/$project',
+  getParentRoute: () => AuthRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthIndexRoute
@@ -59,6 +71,8 @@ export interface FileRoutesByFullPath {
   '/invites': typeof AuthInvitesRoute
   '/tokens': typeof AuthTokensRoute
   '/documents/$slug': typeof AuthDocumentsSlugRoute
+  '/projects/$project': typeof AuthProjectsProjectRoute
+  '/projects/': typeof AuthProjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -67,6 +81,8 @@ export interface FileRoutesByTo {
   '/tokens': typeof AuthTokensRoute
   '/': typeof AuthIndexRoute
   '/documents/$slug': typeof AuthDocumentsSlugRoute
+  '/projects/$project': typeof AuthProjectsProjectRoute
+  '/projects': typeof AuthProjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -77,13 +93,30 @@ export interface FileRoutesById {
   '/_auth/tokens': typeof AuthTokensRoute
   '/_auth/': typeof AuthIndexRoute
   '/_auth/documents/$slug': typeof AuthDocumentsSlugRoute
+  '/_auth/projects/$project': typeof AuthProjectsProjectRoute
+  '/_auth/projects/': typeof AuthProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/login' | '/register' | '/invites' | '/tokens' | '/documents/$slug'
+    | '/'
+    | '/login'
+    | '/register'
+    | '/invites'
+    | '/tokens'
+    | '/documents/$slug'
+    | '/projects/$project'
+    | '/projects/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/register' | '/invites' | '/tokens' | '/' | '/documents/$slug'
+  to:
+    | '/login'
+    | '/register'
+    | '/invites'
+    | '/tokens'
+    | '/'
+    | '/documents/$slug'
+    | '/projects/$project'
+    | '/projects'
   id:
     | '__root__'
     | '/_auth'
@@ -93,6 +126,8 @@ export interface FileRouteTypes {
     | '/_auth/tokens'
     | '/_auth/'
     | '/_auth/documents/$slug'
+    | '/_auth/projects/$project'
+    | '/_auth/projects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -152,6 +187,20 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof AuthDocumentsSlugRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_auth/projects/': {
+      id: '/_auth/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof AuthProjectsIndexRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/_auth/projects/$project': {
+      id: '/_auth/projects/$project'
+      path: '/projects/$project'
+      fullPath: '/projects/$project'
+      preLoaderRoute: typeof AuthProjectsProjectRouteImport
+      parentRoute: typeof AuthRoute
+    }
   }
 }
 
@@ -160,6 +209,8 @@ interface AuthRouteChildren {
   AuthTokensRoute: typeof AuthTokensRoute
   AuthIndexRoute: typeof AuthIndexRoute
   AuthDocumentsSlugRoute: typeof AuthDocumentsSlugRoute
+  AuthProjectsProjectRoute: typeof AuthProjectsProjectRoute
+  AuthProjectsIndexRoute: typeof AuthProjectsIndexRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
@@ -167,6 +218,8 @@ const AuthRouteChildren: AuthRouteChildren = {
   AuthTokensRoute: AuthTokensRoute,
   AuthIndexRoute: AuthIndexRoute,
   AuthDocumentsSlugRoute: AuthDocumentsSlugRoute,
+  AuthProjectsProjectRoute: AuthProjectsProjectRoute,
+  AuthProjectsIndexRoute: AuthProjectsIndexRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
