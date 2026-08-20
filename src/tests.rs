@@ -1630,6 +1630,29 @@ async fn the_docs_origin_carries_documents_and_nothing_else() {
             "{path} must not answer on the docs origin"
         );
     }
+
+    // except its root, where a reader who typed the name they know is sent on
+    // to the app rather than told there is nothing here
+    let response = call(&app, Method::GET, "/", None, ANON).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the app serves its own root"
+    );
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/".parse().unwrap())
+        .header(header::HOST, "docs.test")
+        .finish();
+    let response = app.get_response(request).await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(APP_URL)
+    );
 }
 
 /// A reader who arrives with nothing is sent to the app for a grant, but only

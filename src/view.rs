@@ -56,6 +56,16 @@ pub async fn view_revision(
     .await
 }
 
+/// Nothing lives at the root of the documents host: a reader who arrives there
+/// typed the name they know, and what they are looking for is the app.
+#[handler]
+pub fn docs_root(app_url: Data<&AppUrl>) -> Response {
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, app_url.0.0.as_str())
+        .finish()
+}
+
 /// A document is a directory now, so a relative `<script src="chart.js">`
 /// resolves inside it. The old path answers with a 308, which preserves the
 /// method, so bookmarks and the unlock POST both still land.
@@ -380,7 +390,7 @@ async fn serve(
     let owner = is_owner(req, pool, grant::reader(req, secret), &doc).await;
     if owner || visitor_unlocked(req, secret, &doc) {
         return document_page(
-            pool, secret, app_url, blobs, &doc, public_id, revision, owner,
+            pool, secret, app_url, docs_url, blobs, &doc, public_id, revision, owner,
         )
         .await;
     }
@@ -438,6 +448,7 @@ async fn document_page(
     pool: &SqlitePool,
     secret: &Secret,
     app_url: &AppUrl,
+    docs_url: &DocsUrl,
     blobs: Option<&crate::blobs::Blobs>,
     doc: &Doc,
     public_id: &str,
@@ -530,6 +541,8 @@ async fn document_page(
 
     body.extend_from_slice(
         overlay_fragment(
+            app_url,
+            docs_url,
             &share,
             public_id,
             doc,
@@ -565,7 +578,10 @@ async fn document_page(
 /// A compact pill cluster fixed to the top-right corner. Dark on every
 /// document so it needs no theme detection, hidden in print, no JavaScript:
 /// the revision menu is a details element.
+#[allow(clippy::too_many_arguments)]
 fn overlay_fragment(
+    app_url: &AppUrl,
+    docs_url: &DocsUrl,
     share: &str,
     public_id: &str,
     doc: &Doc,
@@ -576,6 +592,15 @@ fn overlay_fragment(
 ) -> String {
     let slug = &doc.slug;
     let title = html_escape(doc.title.as_deref().unwrap_or(slug));
+
+    // the name says which host the reader is on, and the link goes where they
+    // would want to go from a document, which is the app
+    let app_href = html_escape(app_url.0.as_str());
+    let host = docs_url.0.authority();
+    let brand = match host.split_once('.') {
+        Some((first, rest)) => format!("{}<b>.{}</b>", html_escape(first), html_escape(rest)),
+        None => html_escape(host),
+    };
 
     let revision_links: String = revisions
         .iter()
@@ -610,23 +635,33 @@ fn overlay_fragment(
     format!(
         r#"
 <div id="planenv-overlay">
-<a id="planenv-brand" href="/" title="{title}">plan<b>.env.md</b></a>
+<a id="planenv-brand" href="{app_href}" title="{title}">{brand}</a>
+<div id="planenv-tools">
 {answered}
 <details id="planenv-revs"><summary>{summary}</summary><nav>{revision_links}</nav></details>
 {share}
 </div>
+</div>
 <style>
 #planenv-overlay {{
-  position: fixed; top: 10px; right: 10px; z-index: 2147483647;
-  display: flex; gap: 6px; align-items: stretch;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 10px; padding: 10px;
+  /* the span between the two ends belongs to the document, not to us */
+  pointer-events: none;
   font: 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
 }}
+#planenv-tools {{ display: flex; gap: 6px; align-items: stretch; }}
 #planenv-overlay a, #planenv-overlay summary, #planenv-answered {{
+  pointer-events: auto;
   display: flex; align-items: center;
   background: #1c1f22e8; color: #e7e5df;
-  border: 1px solid #ffffff26; border-radius: 999px;
+  border: 1px solid #ffffff26;
   padding: 7px 12px; text-decoration: none; cursor: pointer;
   white-space: nowrap;
+}}
+#planenv-overlay a:focus-visible, #planenv-overlay summary:focus-visible {{
+  outline: 2px solid #4cc2a0; outline-offset: 1px;
 }}
 #planenv-brand {{ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 600; }}
 #planenv-brand b {{ color: #4cc2a0; }}
@@ -636,12 +671,9 @@ fn overlay_fragment(
 #planenv-revs nav {{
   position: absolute; right: 0; top: calc(100% + 6px);
   display: flex; flex-direction: column; min-width: 130px;
-  background: #1c1f22f2; border: 1px solid #ffffff26;
-  border-radius: 10px; padding: 4px;
+  background: #1c1f22f2; border: 1px solid #ffffff26; padding: 4px;
 }}
-#planenv-revs nav a {{
-  background: none; border: 0; border-radius: 7px; padding: 7px 10px;
-}}
+#planenv-revs nav a {{ background: none; border: 0; padding: 7px 10px; }}
 #planenv-revs nav a:hover {{ background: #ffffff14; }}
 #planenv-revs nav a.viewing {{ color: #4cc2a0; }}
 #planenv-share {{ background: #4cc2a0; border-color: transparent; color: #10201b; font-weight: 600; }}

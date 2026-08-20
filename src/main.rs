@@ -42,6 +42,7 @@ fn app_routes() -> Route {
 /// scripts could use.
 fn docs_routes() -> Route {
     Route::new()
+        .at("/", get(view::docs_root))
         .at(
             "/:public_id/:slug",
             get(view::redirect_to_dir).post(view::unlock),
