@@ -2003,7 +2003,7 @@ async fn a_documents_own_icon_wins_over_the_projects() {
         &app,
         &token,
         "bare",
-        "<h1>no icon here</h1>",
+        "<!doctype html><html><head><title>bare</title></head><body><h1>no icon here</h1></body></html>",
         json!({ "project": "proj" }),
     )
     .await;
@@ -2036,6 +2036,17 @@ async fn a_documents_own_icon_wins_over_the_projects() {
     assert!(
         bare_html.contains("data:image/gif;base64,"),
         "a document with no icon takes the project's: {bare_html}"
+    );
+    // the link has to reach <head>. Appended after </html> the parser reparents
+    // it into <body>, where a favicon link is not reliably honoured, which is
+    // what left every tab blank while the markup looked correct
+    let head = bare_html
+        .split_once("</head>")
+        .expect("the page has a head")
+        .0;
+    assert!(
+        head.contains("data:image/gif;base64,"),
+        "the icon must be inside <head>: {bare_html}"
     );
 
     let owned_html = read(format!("/{owned_id}/owned/")).await;
@@ -2092,5 +2103,57 @@ async fn the_password_gate_carries_the_project_icon() {
     assert!(
         html.contains("data:image/gif;base64,"),
         "the gate should carry the project icon: {html}"
+    );
+}
+
+/// A fragment with nowhere to go must still land ahead of the content, not
+/// after it. A document pushed without a head is unusual but allowed.
+#[tokio::test]
+async fn an_icon_still_precedes_a_document_that_has_no_head() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let gif: Vec<u8> = vec![
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+    ];
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/projects/proj/favicon?scheme=light".parse().unwrap())
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .content_type("application/octet-stream")
+        .body(gif);
+    app.get_response(request).await;
+
+    let pushed = push_with_meta(
+        &app,
+        &token,
+        "headless",
+        "<h1>no head at all</h1>",
+        json!({ "project": "proj" }),
+    )
+    .await;
+    let id = json_body(pushed).await["id"].as_str().unwrap().to_string();
+
+    let html = call(
+        &app,
+        Method::GET,
+        &format!("/{id}/headless/"),
+        None,
+        with_cookie(&cookie),
+    )
+    .await
+    .into_body()
+    .into_string()
+    .await
+    .unwrap();
+
+    let icon_at = html.find("data:image/gif;base64,").expect("the icon is present");
+    let content_at = html.find("no head at all").expect("the content is present");
+    assert!(
+        icon_at < content_at,
+        "the icon must precede the content so the parser keeps it in the head it builds"
     );
 }

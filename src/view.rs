@@ -490,21 +490,19 @@ async fn document_page(
     };
 
     // the project's icon, so a reader's browser tab says which project this
-    // document belongs to. Appended rather than merged into <head>: the parser
-    // honours a link element wherever it appears, and the alternative is
-    // rewriting agent HTML.
+    // the project's icon, so a reader's browser tab says which project this
+    // document belongs to.
     //
-    // Appending also means the project icon would win over one the document
-    // declared itself, since browsers take the last matching link. A document
-    // that brought its own icon meant it, so it keeps it.
+    // Into <head>, unlike everything else here. Appending after </html> puts
+    // the link in <body> once the parser reparents it, and a favicon link in
+    // the body is not reliably honoured: that is why documents carried these
+    // links yet showed a blank tab. A document that declared its own icon
+    // meant it, so it keeps it.
     if let Some(project) = &doc.project
         && !declares_icon(&body)
     {
-        body.extend_from_slice(
-            favicon_fragment(pool, doc.owner_id, project)
-                .await
-                .as_bytes(),
-        );
+        let icon = favicon_fragment(pool, doc.owner_id, project).await;
+        insert_into_head(&mut body, icon.as_bytes());
     }
 
     body.extend_from_slice(
@@ -649,6 +647,32 @@ async fn doc_icon(pool: &SqlitePool, doc: &Doc) -> String {
     }
 }
 
+/// Puts `fragment` just after the document's opening `<head>` tag.
+///
+/// A byte scan rather than a parse, for the same reason as `declares_icon`.
+/// A document with no `<head>` gets the fragment at the very front, where the
+/// parser will build one around it, which is still inside the head rather than
+/// stranded in the body.
+fn insert_into_head(body: &mut Vec<u8>, fragment: &[u8]) {
+    let at = find_head_open(body).unwrap_or(0);
+    body.splice(at..at, fragment.iter().copied());
+}
+
+/// The byte just past `<head ...>`, if the document opens one.
+fn find_head_open(body: &[u8]) -> Option<usize> {
+    let lowered = body.to_ascii_lowercase();
+    let at = lowered
+        .windows(5)
+        .position(|window| window == b"<head")?;
+    // `<head>` or `<head lang=...>`, but not `<header>`
+    let after = body.get(at + 5)?;
+    if !matches!(after, b'>' | b' ' | b'\t' | b'\r' | b'\n') {
+        return None;
+    }
+    let close = lowered[at..].iter().position(|byte| *byte == b'>')?;
+    Some(at + close + 1)
+}
+
 /// Whether the document already asks for a tab icon of its own.
 ///
 /// A scan of the bytes rather than a parse, because the alternative is parsing
@@ -676,9 +700,12 @@ async fn favicon_fragment(pool: &SqlitePool, owner_id: i64, project: &str) -> St
     use crate::api::projects::{Scheme, load_favicon};
 
     let mut links = String::new();
+    // dark first, so a browser that ignores `media` on an icon link takes the
+    // last one and lands on the light-scheme icon, which suits the light tab
+    // strip most of them default to
     for (scheme, media) in [
-        (Scheme::Light, "(prefers-color-scheme: light)"),
         (Scheme::Dark, "(prefers-color-scheme: dark)"),
+        (Scheme::Light, "(prefers-color-scheme: light)"),
     ] {
         let Ok(Some((bytes, content_type))) = load_favicon(pool, owner_id, project, scheme).await
         else {
