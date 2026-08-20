@@ -8,27 +8,16 @@ use poem::{Request, Response, handler};
 use sha2::Sha256;
 use sqlx::SqlitePool;
 
-use crate::config::{BaseUrl, Secret};
+use crate::config::{AppUrl, DocsUrl, Secret};
 use crate::rate_limit::RateLimiter;
-use crate::{auth, static_files};
+use crate::{auth, grant};
 
 const DOC_ACCESS_COOKIE: &str = "doc_access";
 const ACCESS_DAYS: u64 = 7;
-/// Lets the sandboxed document load its own assets.
-///
-/// A document runs in an opaque origin, whose site for cookies is null, so a
-/// SameSite=Lax cookie is not sent even on the document's own subresource
-/// requests. Those requests carry no Origin we can trust, no Referer (the page
-/// is served no-referrer), and no way to add a header, so a cookie that ignores
-/// SameSite is the only thing that reaches them.
-///
-/// SameSite=None means any site can cause this cookie to be sent, so it is
-/// bound to one document, expires in a day, and grants exactly one thing:
-/// reading that document's assets. The entry document still needs real
-/// authorisation, and nothing here can write.
-const DOC_ASSETS_COOKIE: &str = "doc_assets";
-const ASSETS_HOURS: u64 = 24;
 
+/// A public id is minted at exactly this shape, so a path that does not open
+/// with one names no document and never will. Worth checking before answering:
+/// it saves a stranger's typo a redirect and a trip to the app for a grant.
 fn is_public_id_shape(segment: &str) -> bool {
     segment.len() == 10 && segment.bytes().all(|b| b.is_ascii_alphanumeric())
 }
@@ -44,21 +33,12 @@ struct Doc {
 }
 
 #[handler]
-pub async fn view_latest(
-    req: &Request,
-    pool: Data<&SqlitePool>,
-    secret: Data<&Secret>,
-    blobs: Data<&Option<crate::blobs::Blobs>>,
-    Path((public_id, slug)): Path<(String, String)>,
-) -> Response {
-    serve(req, pool.0, secret.0, blobs.0.as_ref(), &public_id, &slug, None).await
-}
-
-#[handler]
 pub async fn view_revision(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    app_url: Data<&AppUrl>,
+    docs_url: Data<&DocsUrl>,
     blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug, revision)): Path<(String, String, i64)>,
 ) -> Response {
@@ -66,6 +46,8 @@ pub async fn view_revision(
         req,
         pool.0,
         secret.0,
+        app_url.0,
+        docs_url.0,
         blobs.0.as_ref(),
         &public_id,
         &slug,
@@ -80,7 +62,7 @@ pub async fn view_revision(
 #[handler]
 pub fn redirect_to_dir(Path((public_id, slug)): Path<(String, String)>) -> Response {
     if !is_public_id_shape(&public_id) {
-        return static_files::serve_or_index(&format!("{public_id}/{slug}"));
+        return not_found();
     }
     Response::builder()
         .status(StatusCode::PERMANENT_REDIRECT)
@@ -107,6 +89,8 @@ pub async fn asset_latest(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    app_url: Data<&AppUrl>,
+    docs_url: Data<&DocsUrl>,
     blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug, path)): Path<(String, String, String)>,
 ) -> Response {
@@ -114,6 +98,8 @@ pub async fn asset_latest(
         req,
         pool.0,
         secret.0,
+        app_url.0,
+        docs_url.0,
         blobs.0.as_ref(),
         &public_id,
         &slug,
@@ -128,6 +114,8 @@ pub async fn asset_revision(
     req: &Request,
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
+    app_url: Data<&AppUrl>,
+    docs_url: Data<&DocsUrl>,
     blobs: Data<&Option<crate::blobs::Blobs>>,
     Path((public_id, slug, revision, path)): Path<(String, String, i64, String)>,
 ) -> Response {
@@ -135,6 +123,8 @@ pub async fn asset_revision(
         req,
         pool.0,
         secret.0,
+        app_url.0,
+        docs_url.0,
         blobs.0.as_ref(),
         &public_id,
         &slug,
@@ -149,6 +139,8 @@ async fn serve_asset(
     req: &Request,
     pool: &SqlitePool,
     secret: &Secret,
+    app_url: &AppUrl,
+    docs_url: &DocsUrl,
     blobs: Option<&crate::blobs::Blobs>,
     public_id: &str,
     slug: &str,
@@ -158,10 +150,13 @@ async fn serve_asset(
     // poem matches the directory URL itself against this wildcard with an empty
     // remainder, so that case is the document rather than a missing asset
     if path.is_empty() {
-        return serve(req, pool, secret, blobs, public_id, slug, revision).await;
+        return serve(
+            req, pool, secret, app_url, docs_url, blobs, public_id, slug, revision,
+        )
+        .await;
     }
-    if !is_public_id_shape(public_id) {
-        return static_files::serve_or_index(&format!("{public_id}/{slug}/{path}"));
+    if !asked_for_by_its_own_document(req, public_id, slug) {
+        return not_found();
     }
     let Some(doc) = fetch_doc(pool, public_id).await else {
         return not_found();
@@ -202,6 +197,7 @@ async fn serve_asset(
             tracing::warn!(document = doc.id, path, %error, "cannot read a document asset");
             return Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header(header::CACHE_CONTROL, "no-store")
                 .finish();
         }
     };
@@ -214,10 +210,54 @@ async fn serve_asset(
     Response::builder()
         .content_type(row.content_type)
         .header(header::CACHE_CONTROL, cache)
-        .header(header::CONTENT_SECURITY_POLICY, "sandbox")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(header::REFERRER_POLICY, "no-referrer")
+        // a stylesheet asks for its own fonts and images, and those requests
+        // have to name it for the rule above to recognise them. Same-origin
+        // keeps the address out of anything a document reaches off this site
+        .header(header::REFERRER_POLICY, "same-origin")
         .body(content)
+}
+
+/// Every document shares one origin, so the browser will hand one document's
+/// files to another document's scripts if we let it. This is where we do not.
+///
+/// A browser states what a request is for and what it came from in headers a
+/// page cannot set, `Sec-Fetch-Dest` and `Sec-Fetch-Site`, and for anything but
+/// a fetch it sets the `Referer` itself. Together they say whether a file is
+/// being loaded by the document it belongs to.
+///
+/// What this does not catch is a `fetch`, whose referrer the calling page may
+/// choose from anywhere on its own origin, and which is therefore refused
+/// outright; and a document another document opened in a window, which is a
+/// page rather than a file and never reaches here. Closing that last one takes
+/// an origin per document, not a rule.
+fn asked_for_by_its_own_document(req: &Request, public_id: &str, slug: &str) -> bool {
+    let Some(dest) = req.header("sec-fetch-dest") else {
+        // not a browser. An agent or a shell carries its own credential and has
+        // no page behind it to protect
+        return true;
+    };
+    let site = req.header("sec-fetch-site");
+    // typed, bookmarked, or otherwise opened by the reader with nothing in
+    // between: there is no page to be reading on somebody's behalf
+    if site == Some("none") {
+        return true;
+    }
+    if site != Some("same-origin") || dest == "empty" {
+        return false;
+    }
+    let scope = format!("/{public_id}/{slug}/");
+    req.header(header::REFERER)
+        .and_then(url_path)
+        .is_some_and(|path| path.starts_with(&scope))
+}
+
+/// The path of an absolute URL, which is all that is left to check once
+/// `Sec-Fetch-Site` has established that it names this origin.
+fn url_path(url: &str) -> Option<&str> {
+    let after_scheme = url.split_once("://")?.1;
+    let start = after_scheme.find('/')?;
+    Some(&after_scheme[start..])
 }
 
 #[derive(serde::Deserialize)]
@@ -229,14 +269,14 @@ pub struct UnlockForm {
 pub async fn unlock(
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
-    base_url: Data<&BaseUrl>,
+    docs_url: Data<&DocsUrl>,
     limiter: Data<&RateLimiter>,
     real_ip: RealIp,
     Path((public_id, slug)): Path<(String, String)>,
     Form(form): Form<UnlockForm>,
 ) -> Response {
     do_unlock(
-        pool.0, secret.0, base_url.0, limiter.0, real_ip, public_id, slug, form,
+        pool.0, secret.0, docs_url.0, limiter.0, real_ip, public_id, slug, form,
     )
     .await
 }
@@ -248,7 +288,7 @@ pub async fn unlock(
 pub async fn unlock_at_dir(
     pool: Data<&SqlitePool>,
     secret: Data<&Secret>,
-    base_url: Data<&BaseUrl>,
+    docs_url: Data<&DocsUrl>,
     limiter: Data<&RateLimiter>,
     real_ip: RealIp,
     Path((public_id, slug, path)): Path<(String, String, String)>,
@@ -258,7 +298,7 @@ pub async fn unlock_at_dir(
         return not_found();
     }
     do_unlock(
-        pool.0, secret.0, base_url.0, limiter.0, real_ip, public_id, slug, form,
+        pool.0, secret.0, docs_url.0, limiter.0, real_ip, public_id, slug, form,
     )
     .await
 }
@@ -267,16 +307,13 @@ pub async fn unlock_at_dir(
 async fn do_unlock(
     pool: &SqlitePool,
     secret: &Secret,
-    base_url: &BaseUrl,
+    docs_url: &DocsUrl,
     limiter: &RateLimiter,
     real_ip: RealIp,
     public_id: String,
     slug: String,
     form: UnlockForm,
 ) -> Response {
-    if !is_public_id_shape(&public_id) {
-        return not_found();
-    }
     if !limiter.allow(real_ip.0) {
         return too_many_requests();
     }
@@ -300,7 +337,7 @@ async fn do_unlock(
     cookie.set_path(format!("/{public_id}/{slug}"));
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Lax);
-    cookie.set_secure(base_url.is_https());
+    cookie.set_secure(docs_url.0.is_https());
     cookie.set_max_age(std::time::Duration::from_secs(ACCESS_DAYS * 24 * 3600));
 
     Response::builder()
@@ -315,36 +352,42 @@ async fn serve(
     req: &Request,
     pool: &SqlitePool,
     secret: &Secret,
+    app_url: &AppUrl,
+    docs_url: &DocsUrl,
     blobs: Option<&crate::blobs::Blobs>,
     public_id: &str,
     slug: &str,
     revision: Option<i64>,
 ) -> Response {
-    // two-segment paths that cannot be document URLs are static assets or SPA
-    // client routes
     if !is_public_id_shape(public_id) {
-        return static_files::serve_or_index(&format!("{public_id}/{slug}"));
-    }
-    let Some(doc) = fetch_doc(pool, public_id).await else {
         return not_found();
+    }
+    let path = req.uri().path().to_string();
+    if let Some(response) = grant::redeem(req, secret, docs_url, &path) {
+        return response;
+    }
+
+    // a document the caller may not read is indistinguishable from one that does
+    // not exist, so both answers are the same, and so is the trip to the app that
+    // may turn this browser into one that is allowed to read it
+    let Some(doc) = fetch_doc(pool, public_id).await else {
+        return grant::ask(req, app_url, &path).unwrap_or_else(not_found);
     };
     if doc.slug != slug {
         return redirect_canonical(public_id, &doc.slug, revision);
     }
 
-    let owner = auth::user_from_request(pool, req)
-        .await
-        .is_some_and(|user| user.id == doc.owner_id);
-    let authorized = owner || visitor_unlocked(req, secret, &doc);
-
-    if authorized {
-        return document_page(pool, secret, blobs, &doc, public_id, revision, owner).await;
+    let owner = is_owner(req, pool, grant::reader(req, secret), &doc).await;
+    if owner || visitor_unlocked(req, secret, &doc) {
+        return document_page(
+            pool, secret, app_url, blobs, &doc, public_id, revision, owner,
+        )
+        .await;
     }
     if doc.published {
         return password_form(public_id, slug, false, &doc_icon(pool, &doc).await);
     }
-    // a private document must be indistinguishable from a missing one
-    not_found()
+    grant::ask(req, app_url, &path).unwrap_or_else(not_found)
 }
 
 fn visitor_unlocked(req: &Request, secret: &Secret, doc: &Doc) -> bool {
@@ -354,59 +397,23 @@ fn visitor_unlocked(req: &Request, secret: &Secret, doc: &Doc) -> bool {
         })
 }
 
-/// Assets answer to the same gate as the document, plus the assets cookie the
-/// document page hands out, which is the only credential a sandboxed page's
-/// subresource requests actually carry.
-async fn is_authorized(req: &Request, pool: &SqlitePool, secret: &Secret, doc: &Doc) -> bool {
-    if has_valid_assets_cookie(req, &secret.0, doc.id) || visitor_unlocked(req, secret, doc) {
+/// Reading as the owner takes either the grant this origin issues to a browser
+/// or an API token, which is what a script or an agent carries. Deliberately not
+/// the session: that one belongs to the app.
+async fn is_owner(req: &Request, pool: &SqlitePool, reader: Option<i64>, doc: &Doc) -> bool {
+    if reader == Some(doc.owner_id) {
         return true;
     }
-    auth::user_from_request(pool, req)
+    auth::token_user(pool, req)
         .await
         .is_some_and(|user| user.id == doc.owner_id)
 }
 
-fn assets_mac(secret: &str, doc_id: i64, expiry: i64) -> Hmac<Sha256> {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac accepts any key length");
-    mac.update(format!("assets.{doc_id}.{expiry}").as_bytes());
-    mac
-}
-
-fn assets_cookie(secret: &str, public_id: &str, doc: &Doc) -> Cookie {
-    let expiry = unix_now() + (ASSETS_HOURS * 3600) as i64;
-    let mac = hex_encode(&assets_mac(secret, doc.id, expiry).finalize().into_bytes());
-    let mut cookie = Cookie::new_with_str(DOC_ASSETS_COOKIE, format!("{expiry}.{mac}"));
-    cookie.set_path(format!("/{public_id}/{}", doc.slug));
-    cookie.set_http_only(true);
-    // SameSite=None is the point: the document is cross-site to itself. Chrome
-    // rejects it without Secure, and treats loopback as a secure context.
-    cookie.set_same_site(SameSite::None);
-    cookie.set_secure(true);
-    cookie.set_max_age(std::time::Duration::from_secs(ASSETS_HOURS * 3600));
-    cookie
-}
-
-fn has_valid_assets_cookie(req: &Request, secret: &str, doc_id: i64) -> bool {
-    let Some(cookie) = req.cookie().get(DOC_ASSETS_COOKIE) else {
-        return false;
-    };
-    let value = cookie.value_str().to_string();
-    let Some((expiry, mac_hex)) = value.split_once('.') else {
-        return false;
-    };
-    let Ok(expiry) = expiry.parse::<i64>() else {
-        return false;
-    };
-    if expiry <= unix_now() {
-        return false;
-    }
-    let Some(mac_bytes) = hex_decode(mac_hex) else {
-        return false;
-    };
-    assets_mac(secret, doc_id, expiry)
-        .verify_slice(&mac_bytes)
-        .is_ok()
+/// A document's files answer to the same gate as the document. They are plain
+/// same-origin subresources of it, so whatever cookie let the page load is sent
+/// with them.
+async fn is_authorized(req: &Request, pool: &SqlitePool, secret: &Secret, doc: &Doc) -> bool {
+    visitor_unlocked(req, secret, doc) || is_owner(req, pool, grant::reader(req, secret), doc).await
 }
 
 async fn fetch_doc(pool: &SqlitePool, public_id: &str) -> Option<Doc> {
@@ -423,12 +430,14 @@ async fn fetch_doc(pool: &SqlitePool, public_id: &str) -> Option<Doc> {
 }
 
 /// The document HTML served as-is, with the floating viewer overlay appended.
-/// Fragment links, scrolling, and printing behave as in the bare document; the
-/// sandbox CSP keeps the document's own scripts in an opaque origin.
+/// Fragment links, scrolling, and printing behave as in the bare document. The
+/// document runs on this origin, which holds nothing but documents: no session,
+/// no API, and no cookie the app reads.
 #[allow(clippy::too_many_arguments)]
 async fn document_page(
     pool: &SqlitePool,
     secret: &Secret,
+    app_url: &AppUrl,
     blobs: Option<&crate::blobs::Blobs>,
     doc: &Doc,
     public_id: &str,
@@ -468,6 +477,7 @@ async fn document_page(
                 tracing::warn!(document = doc.id, %error, "cannot read the document body");
                 return Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .header(header::CACHE_CONTROL, "no-store")
                     .finish();
             }
         },
@@ -475,6 +485,7 @@ async fn document_page(
         Err(_) => {
             return Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header(header::CACHE_CONTROL, "no-store")
                 .finish();
         }
     };
@@ -505,39 +516,49 @@ async fn document_page(
         insert_into_head(&mut body, icon.as_bytes());
     }
 
+    // the share page publishes and rotates passwords, so it belongs to the app
+    // and opens on the app's origin, where the session is
+    let share = if is_owner {
+        let app = app_url.0.as_str();
+        let slug = &doc.slug;
+        format!(
+            r#"<a id="planenv-share" href="{app}/share/{public_id}/{slug}" target="_blank" rel="noopener" onclick="window.open(this.href, 'planenv-share', 'width=440,height=600'); return false">Share</a>"#
+        )
+    } else {
+        String::new()
+    };
+
     body.extend_from_slice(
         overlay_fragment(
+            &share,
             public_id,
             doc,
             current,
             latest,
             &revisions,
-            is_owner,
             questions.len(),
         )
         .as_bytes(),
     );
     if !questions.is_empty() {
-        body.extend_from_slice(answer_widget_fragment(secret, doc, &questions).as_bytes());
+        body.extend_from_slice(answer_widget_fragment(app_url, secret, doc, &questions).as_bytes());
     }
 
-    // allow-popups-to-escape-sandbox lets the overlay's Share button open the
-    // share page in a normal-origin popup where the session cookie works; the
-    // document itself stays in its opaque origin
     Response::builder()
         .content_type("text/html; charset=utf-8")
-        .header(
-            header::CONTENT_SECURITY_POLICY,
-            "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox",
-        )
+        // the overlay differs for the owner, so this body belongs to one reader
+        .header(header::CACHE_CONTROL, "no-store")
+        // no document may frame another, or itself: a frame of a page on this
+        // origin is a page the framing script can read
+        .header(header::CONTENT_SECURITY_POLICY, "frame-ancestors 'none'")
+        // a window this document opens is cut loose from it, so a script cannot
+        // open another document and read what came back. Newer browsers only,
+        // which is why this is one layer and not the boundary
+        .header("cross-origin-opener-policy", "noopener-allow-popups")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(header::REFERRER_POLICY, "no-referrer")
-        // whoever was allowed to read the document may load its assets; see
-        // DOC_ASSETS_COOKIE for why a cookie is the only thing that works here
-        .header(
-            header::SET_COOKIE,
-            assets_cookie(&secret.0, public_id, doc).to_string(),
-        )
+        // the document's own files must be able to name it as their referrer;
+        // nothing off this origin ever sees the address
+        .header(header::REFERRER_POLICY, "same-origin")
         .body(body)
 }
 
@@ -545,12 +566,12 @@ async fn document_page(
 /// document so it needs no theme detection, hidden in print, no JavaScript:
 /// the revision menu is a details element.
 fn overlay_fragment(
+    share: &str,
     public_id: &str,
     doc: &Doc,
     current: i64,
     latest: i64,
     revisions: &[i64],
-    is_owner: bool,
     question_count: usize,
 ) -> String {
     let slug = &doc.slug;
@@ -578,14 +599,6 @@ fn overlay_fragment(
         format!("rev {current}")
     } else {
         format!("rev {current} of {latest}")
-    };
-
-    let share = if is_owner {
-        format!(
-            r#"<a id="planenv-share" href="/{public_id}/{slug}/share" onclick="window.open(this.href, 'planenv-share', 'width=440,height=600'); return false">Share</a>"#
-        )
-    } else {
-        String::new()
     };
 
     let answered = if question_count > 0 {
@@ -661,9 +674,7 @@ fn insert_into_head(body: &mut Vec<u8>, fragment: &[u8]) {
 /// The byte just past `<head ...>`, if the document opens one.
 fn find_head_open(body: &[u8]) -> Option<usize> {
     let lowered = body.to_ascii_lowercase();
-    let at = lowered
-        .windows(5)
-        .position(|window| window == b"<head")?;
+    let at = lowered.windows(5).position(|window| window == b"<head")?;
     // `<head>` or `<head lang=...>`, but not `<header>`
     let after = body.get(at + 5)?;
     if !matches!(after, b'>' | b' ' | b'\t' | b'\r' | b'\n') {
@@ -720,15 +731,18 @@ async fn favicon_fragment(pool: &SqlitePool, owner_id: i64, project: &str) -> St
 }
 
 /// Owner-only: the question set as inert JSON, plus a scoped key that lets the
-/// widget write answers from the document's opaque origin, where the session
-/// cookie is never sent.
+/// widget write answers from the docs origin, where the session cookie is never
+/// sent. The API it writes to lives on the app origin, so the widget is handed
+/// that address rather than resolving one relative to the document.
 fn answer_widget_fragment(
+    app_url: &AppUrl,
     secret: &Secret,
     doc: &Doc,
     questions: &[crate::api::question::AnsweredQuestion],
 ) -> String {
     let key = crate::answer_key::mint(&secret.0, doc.id);
     let slug = &doc.slug;
+    let app = app_url.0.as_str();
     // the HTML parser ends a script block at the first "</script", wherever it
     // appears, so a question containing one would break out of the JSON island;
     // < is still the same string once JSON.parse runs
@@ -740,7 +754,7 @@ fn answer_widget_fragment(
         r#"
 <link rel="stylesheet" href="/_planenv/answer.css">
 <script type="application/json" id="planenv-questions">{data}</script>
-<script src="/_planenv/answer.js" data-planenv-key="{key}" data-planenv-slug="{slug}"></script>
+<script src="/_planenv/answer.js" data-planenv-key="{key}" data-planenv-slug="{slug}" data-planenv-api="{app}"></script>
 "#
     )
 }
@@ -830,19 +844,16 @@ async fn serve_revision_file(
     }
 }
 
-/// The Share popout: a small owner-only page outside the document sandbox.
-/// Publishing, rotating, and unpublishing call the existing session-only API
-/// from here, where the session cookie is available.
+/// The Share popout: a small owner-only page. Publishing, rotating and
+/// unpublishing call the session-only API, so this page lives on the app origin
+/// where the session cookie is, and not with the document it is about.
 #[handler]
 pub async fn share_page(
     req: &Request,
     pool: Data<&SqlitePool>,
-    base_url: Data<&BaseUrl>,
+    docs_url: Data<&DocsUrl>,
     Path((public_id, slug)): Path<(String, String)>,
 ) -> Response {
-    if !is_public_id_shape(&public_id) {
-        return not_found();
-    }
     let Some(doc) = fetch_doc(pool.0, &public_id).await else {
         return not_found();
     };
@@ -858,7 +869,7 @@ pub async fn share_page(
     }
 
     let title = html_escape(doc.title.as_deref().unwrap_or(&doc.slug));
-    let url = format!("{}/{}/{}", base_url.0.0, public_id, doc.slug);
+    let url = format!("{}/{}/{}", docs_url.0.0.as_str(), public_id, doc.slug);
     let state_line = if doc.published {
         "Published. Anyone with the link and the document password can read it."
     } else {
@@ -1088,7 +1099,7 @@ fn access_mac(secret: &str, doc_id: i64, expiry: i64, password_hash: &str) -> St
     )
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
+pub fn hex_encode(bytes: &[u8]) -> String {
     use std::fmt::Write;
     bytes.iter().fold(String::new(), |mut out, byte| {
         let _ = write!(out, "{byte:02x}");
@@ -1106,7 +1117,7 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-fn unix_now() -> i64 {
+pub fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before unix epoch")
@@ -1121,10 +1132,16 @@ fn html_escape(input: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// A document and its assets answer 404 to anyone who may not read them, so
+/// this reply depends on who is asking and must never be stored by a shared
+/// cache. Without `no-store` a CDN caches it against the URL: one request from
+/// a reader without credentials then serves that 404 to everyone, and a
+/// document renders with its stylesheets missing until the entry expires.
 fn not_found() -> Response {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .content_type("text/plain; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
         .body("not found")
 }
 
@@ -1132,6 +1149,7 @@ fn too_many_requests() -> Response {
     Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
         .content_type("text/plain; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
         .body("too many attempts from this address; try again later")
 }
 
@@ -1216,6 +1234,7 @@ fn password_form(public_id: &str, slug: &str, wrong_password: bool, icon: &str) 
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
         .content_type("text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(html)
 }

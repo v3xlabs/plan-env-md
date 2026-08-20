@@ -1324,8 +1324,8 @@ export interface paths {
             };
         };
         /**
-         * CORS preflight for the two answer routes. The widget calls from the
-         *     document's opaque origin, which presents `Origin: null`.
+         * CORS preflight for the two answer routes. The widget calls from the docs
+         *     origin, which is not the origin this API answers on.
          */
         options: {
             parameters: {
@@ -1482,6 +1482,17 @@ export interface components {
             revisions: components["schemas"]["RevisionBody"][];
             questions: components["schemas"]["AnsweredQuestion"][];
         };
+        /**
+         * FileBody
+         * @description One file of a revision, at the path it is served from under the document's
+         *     directory URL.
+         */
+        FileBody: {
+            path: string;
+            /** Format: int64 */
+            size_bytes: number;
+            content_type: string;
+        };
         /** InviteBody */
         InviteBody: {
             /** Format: int64 */
@@ -1537,6 +1548,12 @@ export interface components {
             /** Format: int64 */
             size_bytes: number;
             url: string;
+            /**
+             * @description Every file the revision holds, as stored. A caller that linked an asset
+             *     from the entry document compares its href against these paths to see
+             *     that the file arrived and arrived where the link points.
+             */
+            files: components["schemas"]["FileBody"][];
         };
         /** QuestionOption */
         QuestionOption: {
@@ -1557,6 +1574,7 @@ export interface components {
             /** Format: int64 */
             size_bytes: number;
             created_at: string;
+            files: components["schemas"]["FileBody"][];
         };
         /** @enum {string} */
         Scheme: "light" | "dark";

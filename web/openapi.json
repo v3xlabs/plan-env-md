@@ -1392,7 +1392,7 @@
         }
       },
       "options": {
-        "summary": "CORS preflight for the two answer routes. The widget calls from the\ndocument's opaque origin, which presents `Origin: null`.",
+        "summary": "CORS preflight for the two answer routes. The widget calls from the docs\norigin, which is not the origin this API answers on.",
         "parameters": [
           {
             "name": "_slug",
@@ -1735,6 +1735,28 @@
           }
         }
       },
+      "FileBody": {
+        "type": "object",
+        "title": "FileBody",
+        "description": "One file of a revision, at the path it is served from under the document's\ndirectory URL.",
+        "required": [
+          "path",
+          "size_bytes",
+          "content_type"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "content_type": {
+            "type": "string"
+          }
+        }
+      },
       "InviteBody": {
         "type": "object",
         "title": "InviteBody",
@@ -1866,7 +1888,8 @@
           "slug",
           "revision",
           "size_bytes",
-          "url"
+          "url",
+          "files"
         ],
         "properties": {
           "id": {
@@ -1886,6 +1909,13 @@
           },
           "url": {
             "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "description": "Every file the revision holds, as stored. A caller that linked an asset\nfrom the entry document compares its href against these paths to see\nthat the file arrived and arrived where the link points.",
+            "items": {
+              "$ref": "#/components/schemas/FileBody"
+            }
           }
         }
       },
@@ -1933,7 +1963,8 @@
         "required": [
           "revision",
           "size_bytes",
-          "created_at"
+          "created_at",
+          "files"
         ],
         "properties": {
           "revision": {
@@ -1946,6 +1977,12 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileBody"
+            }
           }
         }
       },
@@ -2015,7 +2052,7 @@
       "SessionAuth": {
         "type": "apiKey",
         "description": "Session cookie, for the management UI.",
-        "name": "session",
+        "name": "__Host-session",
         "in": "cookie"
       }
     }

@@ -56,7 +56,9 @@ struct Question {
     key: String,
     #[schemars(description = "The question itself, as the reader will read it.")]
     prompt: String,
-    #[schemars(description = "Optional line under the prompt for context the prompt cannot carry.")]
+    #[schemars(
+        description = "Optional line under the prompt for context the prompt cannot carry."
+    )]
     detail: Option<String>,
     #[schemars(
         description = "An element id in the page. The card is placed after that element, so the question sits with the section it is about."
@@ -77,7 +79,9 @@ struct QuestionOption {
     value: String,
     #[schemars(description = "The choice as the reader sees it. A few words.")]
     label: String,
-    #[schemars(description = "Optional line under the label, for a tradeoff the label cannot carry.")]
+    #[schemars(
+        description = "Optional line under the label, for a tradeoff the label cannot carry."
+    )]
     detail: Option<String>,
 }
 
@@ -159,7 +163,8 @@ struct ReadResult {
 
 struct PlanServer {
     api: Api,
-    base_url: reqwest::Url,
+    /// Where documents are read, which is not where the API answers.
+    docs_url: reqwest::Url,
 }
 
 impl PlanServer {
@@ -173,13 +178,19 @@ impl PlanServer {
         }
         let url = reqwest::Url::parse(document)
             .map_err(|_| "document must be a slug or a plan.env.md URL".to_string())?;
-        if url.origin() != self.base_url.origin() {
-            return Err("document URL must use the configured plan.env.md origin".to_string());
+        if url.origin() != self.docs_url.origin() {
+            return Err("document URL must use the configured documents origin".to_string());
         }
-        let segments = url
+        // the service redirects a document to its directory form, so the URL a
+        // reader copies out of the address bar ends in a slash and yields a
+        // trailing empty segment
+        let mut segments = url
             .path_segments()
             .ok_or_else(|| "document URL has no path".to_string())?
             .collect::<Vec<_>>();
+        if segments.last() == Some(&"") {
+            segments.pop();
+        }
         let (slug, pinned) = match segments.as_slice() {
             [_, slug] => (*slug, None),
             [_, slug, "rev", value] => (
@@ -398,8 +409,8 @@ impl PlanServer {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::from_env().map_err(std::io::Error::other)?;
     let server = PlanServer {
-        api: Api::new(config.base_url.clone(), config.token).map_err(std::io::Error::other)?,
-        base_url: config.base_url,
+        api: Api::new(config.base_url, config.token).map_err(std::io::Error::other)?,
+        docs_url: config.docs_url,
     };
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
@@ -437,9 +448,9 @@ mod tests {
 
     #[test]
     fn url_resolution_rejects_other_origins() {
-        let base_url = reqwest::Url::parse("https://plan.env.md/").expect("valid URL");
-        let api = crate::api::Api::new(base_url.clone(), "token".to_string()).expect("client");
-        let server = PlanServer { api, base_url };
+        let docs_url = reqwest::Url::parse("https://plan.env.md/").expect("valid URL");
+        let api = crate::api::Api::new(docs_url.clone(), "token".to_string()).expect("client");
+        let server = PlanServer { api, docs_url };
         assert!(
             server
                 .resolve_document("https://example.com/id/plan", None)
@@ -448,6 +459,25 @@ mod tests {
         assert_eq!(
             server
                 .resolve_document("https://plan.env.md/id/plan/rev/2", None)
+                .expect("document"),
+            ("plan".to_string(), Some(2))
+        );
+    }
+
+    #[test]
+    fn url_resolution_accepts_the_canonical_directory_form() {
+        let docs_url = reqwest::Url::parse("https://plan.env.md/").expect("valid URL");
+        let api = crate::api::Api::new(docs_url.clone(), "token".to_string()).expect("client");
+        let server = PlanServer { api, docs_url };
+        assert_eq!(
+            server
+                .resolve_document("https://plan.env.md/id/plan/", None)
+                .expect("document"),
+            ("plan".to_string(), None)
+        );
+        assert_eq!(
+            server
+                .resolve_document("https://plan.env.md/id/plan/rev/2/", None)
                 .expect("document"),
             ("plan".to_string(), Some(2))
         );

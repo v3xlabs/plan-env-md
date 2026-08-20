@@ -6,7 +6,6 @@ use sqlx::SqlitePool;
 
 use crate::api::{internal, is_unique_violation};
 use crate::auth::{self, Auth, SESSION_COOKIE, SessionAuth};
-use crate::config::BaseUrl;
 use crate::rate_limit::RateLimiter;
 
 pub struct AuthApi;
@@ -75,7 +74,6 @@ impl AuthApi {
     async fn register(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
         limiter: Data<&RateLimiter>,
         real_ip: RealIp,
         cookies: &CookieJar,
@@ -164,7 +162,7 @@ impl AuthApi {
         let token = auth::create_session(pool.0, user_id)
             .await
             .map_err(internal)?;
-        cookies.add(auth::session_cookie(token, base_url.0.is_https()));
+        cookies.add(auth::session_cookie(token));
 
         Ok(RegisterResponse::Ok(Json(UserBody {
             id: user_id,
@@ -178,7 +176,6 @@ impl AuthApi {
     async fn login(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
         limiter: Data<&RateLimiter>,
         real_ip: RealIp,
         cookies: &CookieJar,
@@ -211,7 +208,7 @@ impl AuthApi {
         let token = auth::create_session(pool.0, row.id)
             .await
             .map_err(internal)?;
-        cookies.add(auth::session_cookie(token, base_url.0.is_https()));
+        cookies.add(auth::session_cookie(token));
 
         Ok(LoginResponse::Ok(Json(UserBody {
             id: row.id,

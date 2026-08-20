@@ -25,6 +25,10 @@ RUN apt-get update \
 COPY --from=server /build/target/release/plan-env-md /usr/local/bin/plan-env-md
 ENV BIND=0.0.0.0:3000
 ENV DATABASE_URL=sqlite:///data/plan-env-md.db
+# two origins, one process: the app answers on one hostname and documents on the
+# other, and the ingress has to route both here
+ENV APP_URL=https://env.md
+ENV DOCS_URL=https://plan.env.md
 ENV PREVIEW_CHROMIUM=/usr/bin/chromium
 VOLUME /data
 EXPOSE 3000

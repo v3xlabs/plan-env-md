@@ -10,7 +10,12 @@ use poem_openapi::auth::{ApiKey, Bearer};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
-pub const SESSION_COOKIE: &str = "session";
+/// The `__Host-` prefix is the point of the name: a browser refuses to store a
+/// cookie called this unless it is secure, path-wide and bound to the exact host
+/// that set it. Documents run on a sibling host of the app's, and without the
+/// prefix one of them could set a session cookie for the whole domain that the
+/// app would then read.
+pub const SESSION_COOKIE: &str = "__Host-session";
 const SESSION_DAYS: u64 = 30;
 const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -30,7 +35,7 @@ pub struct BearerAuth(pub AuthUser);
 #[derive(SecurityScheme)]
 #[oai(
     ty = "api_key",
-    key_name = "session",
+    key_name = "__Host-session",
     key_in = "cookie",
     checker = "check_session"
 )]
@@ -107,18 +112,52 @@ pub async fn session_user(pool: &SqlitePool, key: &str) -> Option<AuthUser> {
     })
 }
 
+/// A write the session cookie authorises has to come from the app's own pages.
+///
+/// The docs origin is a sibling of this one, so a browser treats the two as the
+/// same site and sends the session cookie on a request a document's script
+/// started. `SameSite` therefore protects nothing here. `Origin` does: a script
+/// cannot set it, so a write that claims another origin, or names none at all,
+/// is not one the reader asked for.
+pub async fn reject_foreign_writes<E: poem::Endpoint>(
+    next: std::sync::Arc<E>,
+    req: Request,
+) -> poem::Result<E::Output> {
+    let reads = matches!(
+        *req.method(),
+        poem::http::Method::GET | poem::http::Method::HEAD | poem::http::Method::OPTIONS
+    );
+    let by_cookie = req.cookie().get(SESSION_COOKIE).is_some();
+    let app_url = req.data::<crate::config::AppUrl>();
+
+    if !reads
+        && by_cookie
+        && req.header(poem::http::header::ORIGIN) != app_url.map(|app_url| app_url.0.as_str())
+    {
+        return Err(poem::Error::from_status(poem::http::StatusCode::FORBIDDEN));
+    }
+    next.call(req).await
+}
+
 /// Resolve the requester on a plain poem route, outside the OpenAPI app.
 pub async fn user_from_request(pool: &SqlitePool, req: &Request) -> Option<AuthUser> {
-    let bearer = req
-        .headers()
-        .get(poem::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    if let Some(token) = bearer {
-        return lookup_bearer(pool, token).await;
+    if let Some(user) = token_user(pool, req).await {
+        return Some(user);
     }
     let key = req.cookie().get(SESSION_COOKIE)?.value_str().to_string();
     session_user(pool, &key).await
+}
+
+/// The account an API token names, and nothing else. This is what the docs
+/// origin asks: a session is the app's credential, so a document route must not
+/// honour one even if a request carries it.
+pub async fn token_user(pool: &SqlitePool, req: &Request) -> Option<AuthUser> {
+    let token = req
+        .headers()
+        .get(poem::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))?;
+    lookup_bearer(pool, token).await
 }
 
 pub async fn create_session(pool: &SqlitePool, user_id: i64) -> Result<String, sqlx::Error> {
@@ -135,12 +174,15 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> Result<String, s
     Ok(token)
 }
 
-pub fn session_cookie(token: String, secure: bool) -> Cookie {
+/// Always secure, whatever the app is served over: the `__Host-` prefix is only
+/// honoured on a secure cookie, and a browser counts loopback as secure, so a
+/// development server over plain HTTP still keeps its session.
+pub fn session_cookie(token: String) -> Cookie {
     let mut cookie = Cookie::new_with_str(SESSION_COOKIE, token);
     cookie.set_path("/");
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Lax);
-    cookie.set_secure(secure);
+    cookie.set_secure(true);
     cookie.set_max_age(Duration::from_secs(SESSION_DAYS * 24 * 3600));
     cookie
 }

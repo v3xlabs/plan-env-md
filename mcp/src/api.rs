@@ -14,6 +14,17 @@ pub struct PushedDocument {
     pub revision: i64,
     pub size_bytes: i64,
     pub url: String,
+    /// What the revision holds, so a caller can check that every asset it
+    /// linked from the entry document arrived at the path the link uses
+    pub files: Vec<File>,
+}
+
+/// One stored file, served at `<document url>/<path>`.
+#[derive(Deserialize, Serialize)]
+pub struct File {
+    pub path: String,
+    pub size_bytes: i64,
+    pub content_type: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -21,6 +32,7 @@ pub struct Revision {
     pub revision: i64,
     pub size_bytes: i64,
     pub created_at: String,
+    pub files: Vec<File>,
 }
 
 #[derive(Deserialize, Serialize)]

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT r.revision as \"revision!: i64\", f.path as \"path!: String\",\n                  f.size_bytes as \"size_bytes!: i64\", f.content_type as \"content_type!: String\"\n           FROM revision_files f JOIN revisions r ON r.id = f.revision_id\n           WHERE r.document_id = ? ORDER BY r.revision, f.path",
+  "describe": {
+    "columns": [
+      {
+        "name": "revision!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "path!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "size_bytes!: i64",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "content_type!: String",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "137a6bd9b80cbb938cb8c72b22e49d50019b8395696861eac3f45817f680ab20"
+}

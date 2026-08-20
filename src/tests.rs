@@ -26,11 +26,28 @@ async fn test_app_with_blobs(
         .expect("migrations");
     let app = crate::app(
         pool.clone(),
-        crate::config::BaseUrl("http://test.local".to_string()),
+        crate::config::AppUrl(crate::config::Origin(APP_URL.to_string())),
+        crate::config::DocsUrl(crate::config::Origin(DOCS_URL.to_string())),
         crate::config::Secret("test-secret".to_string()),
         blobs.clone(),
     );
     (app, pool, blobs)
+}
+
+const APP_URL: &str = "http://app.test";
+const DOCS_URL: &str = "http://docs.test";
+
+/// A request reaches the origin its path belongs to, as a browser's would: the
+/// app answers on one hostname and documents on the other, and neither set of
+/// routes exists on the other's.
+fn host_of(path: &str) -> &'static str {
+    let first = path.trim_start_matches('/').split('/').next().unwrap_or("");
+    let is_public_id = first.len() == 10 && first.bytes().all(|b| b.is_ascii_alphanumeric());
+    if is_public_id || first == "_planenv" {
+        "docs.test"
+    } else {
+        "app.test"
+    }
 }
 
 struct Call<'a> {
@@ -64,7 +81,17 @@ async fn call(
     body: Option<Value>,
     auth: Call<'_>,
 ) -> Response {
-    let mut builder = Request::builder().method(method).uri(path.parse().unwrap());
+    let host = host_of(path);
+    let writes = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(path.parse().unwrap())
+        .header(header::HOST, host);
+    // a browser names the origin it is writing from, and the app refuses a
+    // cookie-authorised write that does not
+    if writes {
+        builder = builder.header(header::ORIGIN, format!("http://{host}"));
+    }
     if let Some(cookie) = auth.cookie {
         builder = builder.header(header::COOKIE, cookie);
     }
@@ -78,6 +105,43 @@ async fn call(
         None => builder.finish(),
     };
     app.get_response(request).await
+}
+
+/// The cookie a browser ends up holding on the docs origin, by walking the
+/// exchange it would walk: ask the app for a grant with the session, then
+/// redeem it where the documents are.
+async fn reader_cookie(app: &impl Endpoint, session: &str, path: &str) -> String {
+    let response = call(
+        app,
+        Method::GET,
+        &format!("/grant?next={path}"),
+        None,
+        with_cookie(session),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER, "the app grants");
+    let back = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("a way back")
+        .to_str()
+        .unwrap()
+        .strip_prefix(DOCS_URL)
+        .expect("back to the docs origin")
+        .to_string();
+
+    let response = call(app, Method::GET, &back, None, ANON).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER, "the docs redeem");
+    response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("a reader cookie")
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string()
 }
 
 fn session_cookie_of(response: &Response) -> String {
@@ -386,11 +450,12 @@ fn one_question() -> Value {
 }
 
 /// The key the viewer hands the widget, read back out of the served document.
-async fn scoped_key(app: &impl Endpoint, cookie: &str, id: &str, slug: &str) -> Option<String> {
+async fn scoped_key(app: &impl Endpoint, token: &str, id: &str, slug: &str) -> Option<String> {
     let request = Request::builder()
         .method(Method::GET)
         .uri(format!("/{id}/{slug}/").parse().unwrap())
-        .header(header::COOKIE, cookie)
+        .header(header::HOST, host_of(&format!("/{id}/{slug}/")))
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
         .finish();
     let html = app
         .get_response(request)
@@ -449,10 +514,7 @@ async fn push_creates_then_appends_revisions_at_same_url() {
     let id = body["id"].as_str().unwrap().to_string();
     assert_eq!(id.len(), 10);
     assert_eq!(body["revision"], json!(1));
-    assert_eq!(
-        body["url"],
-        json!(format!("http://test.local/{id}/my-plan"))
-    );
+    assert_eq!(body["url"], json!(format!("{DOCS_URL}/{id}/my-plan")));
 
     let response = push(&app, &token, "my-plan", "<h1>rev two</h1>").await;
     let body = json_body(response).await;
@@ -611,6 +673,7 @@ async fn unlock(app: &impl Endpoint, path: &str, password: &str) -> Response {
     let request = Request::builder()
         .method(Method::POST)
         .uri(path.parse().unwrap())
+        .header(header::HOST, host_of(path))
         .content_type("application/x-www-form-urlencoded")
         .body(format!("password={password}"));
     app.get_response(request).await
@@ -648,7 +711,8 @@ async fn public_view_password_gate_lifecycle() {
     // overlay (revision menu, Share) appended
     let response = call(&app, Method::GET, &doc_path, None, ANON).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    let response = call(&app, Method::GET, &doc_path, None, with_cookie(&cookie)).await;
+    let reader = reader_cookie(&app, &cookie, &doc_path).await;
+    let response = call(&app, Method::GET, &doc_path, None, with_cookie(&reader)).await;
     assert_eq!(response.status(), StatusCode::OK);
     let text = response.into_body().into_string().await.unwrap();
     assert!(text.starts_with("<h1>rev two</h1>"));
@@ -669,7 +733,7 @@ async fn public_view_password_gate_lifecycle() {
     assert_eq!(
         json_body(response).await["url"],
         // the bare URL stays the emitted permalink; it 308s to the directory form
-        json!(format!("http://test.local/{id}/plan"))
+        json!(format!("{DOCS_URL}/{id}/plan"))
     );
 
     // a PAT must not be able to publish
@@ -700,13 +764,6 @@ async fn public_view_password_gate_lifecycle() {
     let access = access_cookie_of(&response);
     let response = call(&app, Method::GET, &doc_path, None, with_cookie(&access)).await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_SECURITY_POLICY)
-            .unwrap(),
-        "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox"
-    );
     let text = response.into_body().into_string().await.unwrap();
     assert!(text.starts_with("<h1>rev two</h1>"));
     assert!(text.contains("planenv-overlay"));
@@ -938,6 +995,7 @@ async fn unlock_attempts_are_rate_limited_per_ip() {
             let request = Request::builder()
                 .method(Method::POST)
                 .uri(path.parse().unwrap())
+                .header(header::HOST, host_of(&path))
                 .header("x-forwarded-for", "10.7.7.7")
                 .content_type("application/x-www-form-urlencoded")
                 .body(format!("password={password}"));
@@ -976,7 +1034,7 @@ async fn share_page_is_owner_only() {
         .as_str()
         .unwrap()
         .to_string();
-    let share_path = format!("/{id}/shared-plan/share");
+    let share_path = format!("/share/{id}/shared-plan");
 
     // owner sees the share controls
     let response = call(&app, Method::GET, &share_path, None, with_cookie(&cookie)).await;
@@ -1008,7 +1066,7 @@ async fn share_page_is_owner_only() {
         Method::GET,
         &format!("/{id}/shared-plan/"),
         None,
-        with_cookie(&cookie),
+        with_bearer(&token),
     )
     .await;
     let text = response.into_body().into_string().await.unwrap();
@@ -1054,7 +1112,7 @@ async fn answers_reject_agent_tokens_but_accept_sessions_and_scoped_keys() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    let key = scoped_key(&app, &cookie, &id, "plan")
+    let key = scoped_key(&app, &token, &id, "plan")
         .await
         .expect("owner gets a scoped key");
     let response = answer(
@@ -1093,7 +1151,7 @@ async fn a_scoped_key_is_bound_to_one_document() {
         .to_string();
     push_with_meta(&app, &token, "second", "<h1>second</h1>", one_question()).await;
 
-    let key = scoped_key(&app, &cookie, &first_id, "first").await.unwrap();
+    let key = scoped_key(&app, &token, &first_id, "first").await.unwrap();
 
     let response = answer(
         &app,
@@ -1244,7 +1302,7 @@ async fn visitors_get_no_widget_no_key_and_no_questions() {
     assert!(!html.contains(r#"id="planenv-questions""#));
 
     // and the owner viewing the same document does get all three
-    assert!(scoped_key(&app, &cookie, &id, "plan").await.is_some());
+    assert!(scoped_key(&app, &token, &id, "plan").await.is_some());
 }
 
 #[tokio::test]
@@ -1289,7 +1347,8 @@ async fn a_question_cannot_break_out_of_the_json_island() {
     let request = Request::builder()
         .method(Method::GET)
         .uri(format!("/{id}/plan/").parse().unwrap())
-        .header(header::COOKIE, &cookie)
+        .header(header::HOST, host_of(&format!("/{id}/plan/")))
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
         .finish();
     let html = app
         .get_response(request)
@@ -1363,6 +1422,8 @@ async fn a_revision_serves_its_assets_beside_the_document() {
         .unwrap()
         .to_string();
 
+    let reader = reader_cookie(&app, &cookie, &format!("/{id}/multi/")).await;
+
     for (path, content_type) in [
         ("style.css", "text/css; charset=utf-8"),
         ("img/dot.svg", "image/svg+xml"),
@@ -1372,7 +1433,7 @@ async fn a_revision_serves_its_assets_beside_the_document() {
             Method::GET,
             &format!("/{id}/multi/{path}"),
             None,
-            with_cookie(&cookie),
+            with_cookie(&reader),
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK, "{path} should be served");
@@ -1399,10 +1460,329 @@ async fn a_revision_serves_its_assets_beside_the_document() {
         Method::GET,
         &format!("/{id}/multi/nothing.css"),
         None,
-        with_cookie(&cookie),
+        with_cookie(&reader),
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A shared cache in front of the service stores by URL and knows nothing of
+/// the cookie that decided the reply. One request from a reader without
+/// credentials would otherwise pin a 404 over an asset for everyone.
+#[tokio::test]
+async fn a_reply_that_turns_on_the_reader_forbids_storing() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = push_files(
+        &app,
+        &token,
+        "multi",
+        &[
+            ("index.html", "<h1>multi</h1>"),
+            ("style.css", "h1{color:red}"),
+        ],
+    )
+    .await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let reader = reader_cookie(&app, &cookie, &format!("/{id}/multi/")).await;
+
+    for (path, auth, status) in [
+        (
+            format!("/{id}/multi/style.css"),
+            ANON,
+            StatusCode::NOT_FOUND,
+        ),
+        (format!("/{id}/multi/"), ANON, StatusCode::NOT_FOUND),
+        (
+            format!("/{id}/multi/"),
+            with_cookie(&reader),
+            StatusCode::OK,
+        ),
+    ] {
+        let response = call(&app, Method::GET, &path, None, auth).await;
+        assert_eq!(response.status(), status, "{path}");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store"),
+            "{path} must not be stored by a cache the reader does not own"
+        );
+    }
+}
+
+/// Every document shares one origin, so this rule is what keeps one document's
+/// scripts from helping themselves to another's files.
+#[tokio::test]
+async fn a_documents_files_are_served_to_that_document_only() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let mine = push_files(
+        &app,
+        &token,
+        "mine",
+        &[
+            ("index.html", "<h1>mine</h1>"),
+            ("style.css", "h1{color:red}"),
+        ],
+    )
+    .await;
+    let mine_id = json_body(mine).await["id"].as_str().unwrap().to_string();
+    let theirs = push_files(&app, &token, "theirs", &[("index.html", "<h1>b</h1>")]).await;
+    let theirs_id = json_body(theirs).await["id"].as_str().unwrap().to_string();
+    let reader = reader_cookie(&app, &cookie, &format!("/{mine_id}/mine/")).await;
+
+    let asset = format!("/{mine_id}/mine/style.css");
+    let load = |dest: &'static str, site: &'static str, referer: Option<String>| {
+        let app = &app;
+        let asset = asset.clone();
+        let reader = reader.clone();
+        async move {
+            let mut builder = Request::builder()
+                .method(Method::GET)
+                .uri(asset.parse().unwrap())
+                .header(header::HOST, "docs.test")
+                .header(header::COOKIE, reader)
+                .header("sec-fetch-dest", dest)
+                .header("sec-fetch-site", site);
+            if let Some(referer) = referer {
+                builder = builder.header(header::REFERER, referer);
+            }
+            app.get_response(builder.finish()).await.status()
+        }
+    };
+
+    let own_page = format!("{DOCS_URL}/{mine_id}/mine/");
+    let other_page = format!("{DOCS_URL}/{theirs_id}/theirs/");
+
+    // its own document loads it, from the page and from a stylesheet beneath it
+    for referer in [own_page.clone(), format!("{own_page}nested/deep.css")] {
+        assert_eq!(
+            load("style", "same-origin", Some(referer.clone())).await,
+            StatusCode::OK,
+            "{referer}"
+        );
+    }
+    // the reader opening the file themselves, with no page in between
+    assert_eq!(load("document", "none", None).await, StatusCode::OK);
+    // an agent, which sends no fetch metadata and carries its own credential
+    let response = call(&app, Method::GET, &asset, None, with_bearer(&token)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // another document, by every route a browser offers it
+    for (dest, referer) in [
+        ("style", Some(other_page.clone())),
+        ("image", Some(other_page.clone())),
+        ("script", Some(other_page.clone())),
+        ("iframe", Some(other_page.clone())),
+        ("document", Some(other_page.clone())),
+        ("style", None),
+    ] {
+        assert_eq!(
+            load(dest, "same-origin", referer.clone()).await,
+            StatusCode::NOT_FOUND,
+            "{dest} from {referer:?}"
+        );
+    }
+
+    // and a fetch, whose referrer the calling page picks, is refused whatever it
+    // claims to be
+    assert_eq!(
+        load("empty", "same-origin", Some(own_page)).await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+/// The two origins are the whole point: whatever a document's scripts can reach
+/// is what this test says they can reach.
+#[tokio::test]
+async fn the_docs_origin_carries_documents_and_nothing_else() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push(&app, &token, "plan", "<h1>plan</h1>").await;
+
+    for path in [
+        "/api/docs",
+        "/api/tokens",
+        "/grant?next=/x",
+        "/share/x/plan",
+    ] {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(path.parse().unwrap())
+            .header(header::HOST, "docs.test")
+            .header(header::COOKIE, &cookie)
+            .finish();
+        let response = app.get_response(request).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{path} must not answer on the docs origin"
+        );
+    }
+}
+
+/// A reader who arrives with nothing is sent to the app for a grant, but only
+/// when a browser is navigating: anything else gets the plain answer, so a
+/// script or an agent is never handed a redirect it cannot follow.
+#[tokio::test]
+async fn a_navigation_with_no_grant_is_sent_to_the_app_for_one() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    let response = push(&app, &token, "plan", "<h1>plan</h1>").await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let path = format!("/{id}/plan/");
+
+    let navigate = |path: String| {
+        let app = &app;
+        async move {
+            let request = Request::builder()
+                .method(Method::GET)
+                .uri(path.parse().unwrap())
+                .header(header::HOST, "docs.test")
+                .header("sec-fetch-dest", "document")
+                .finish();
+            app.get_response(request).await
+        }
+    };
+
+    let response = navigate(path.clone()).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(format!("{APP_URL}/grant?next={path}").as_str())
+    );
+
+    // a document nobody owns is the same trip, so the redirect says nothing
+    // about whether the document exists
+    let response = navigate("/aaaaaaaaaa/nothing/".to_string()).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    // and the reader who comes back with nobody's grant is told no, once
+    let nobody = reader_cookie(&app, "session=nothing", &path).await;
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(path.parse().unwrap())
+        .header(header::HOST, "docs.test")
+        .header("sec-fetch-dest", "document")
+        .header(header::COOKIE, &nobody)
+        .finish();
+    assert_eq!(
+        app.get_response(request).await.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // the same request from something that is not navigating is answered, not
+    // redirected
+    let response = call(&app, Method::GET, &path, None, ANON).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// The docs origin is a sibling of the app's, so the browser counts the two as
+/// one site and sends the session cookie on a request a document started.
+/// `Origin` is what tells the two apart.
+#[tokio::test]
+async fn a_write_from_another_origin_is_refused() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+
+    for origin in [Some(DOCS_URL), Some("https://elsewhere.example"), None] {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri("/api/invites".parse().unwrap())
+            .header(header::HOST, "app.test")
+            .header(header::COOKIE, &cookie);
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        let response = app.get_response(builder.finish()).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "a write claiming {origin:?} must be refused"
+        );
+    }
+
+    // the app's own pages still write
+    let response = call(
+        &app,
+        Method::POST,
+        "/api/invites",
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// A document that renders without its stylesheet is the failure this answers:
+/// the push says what it stored, so the caller can check its links against it.
+#[tokio::test]
+async fn a_push_reports_the_files_it_stored() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let response = push_files(
+        &app,
+        &token,
+        "multi",
+        &[
+            ("index.html", "<h1>multi</h1>"),
+            ("style.css", "h1{color:red}"),
+            ("img/dot.svg", "<svg/>"),
+        ],
+    )
+    .await;
+    let pushed = json_body(response).await;
+    let files = pushed["files"]
+        .as_array()
+        .expect("the push lists its files");
+    assert_eq!(
+        files
+            .iter()
+            .map(|file| file["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["index.html", "style.css", "img/dot.svg"]
+    );
+    assert_eq!(files[1]["content_type"], "text/css; charset=utf-8");
+    assert_eq!(files[1]["size_bytes"], "h1{color:red}".len() as i64);
+
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/multi",
+        None,
+        with_bearer(&token),
+    )
+    .await;
+    let detail = json_body(response).await;
+    assert_eq!(
+        detail["revisions"][0]["files"]
+            .as_array()
+            .expect("a revision lists its files")
+            .iter()
+            .map(|file| file["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["img/dot.svg", "index.html", "style.css"]
+    );
 }
 
 #[tokio::test]
@@ -1444,7 +1824,7 @@ async fn a_file_set_must_fit_its_rules() {
 }
 
 #[tokio::test]
-async fn the_assets_cookie_is_bound_to_one_document() {
+async fn a_reader_grant_is_not_the_session_and_reads_as_one_account() {
     let app = test_app().await;
     let cookie = session_cookie_of(&register(&app, "admin", None).await);
     let token = agent_token(&app, &cookie).await;
@@ -1466,8 +1846,8 @@ async fn the_assets_cookie_is_bound_to_one_document() {
     .await;
     let second_id = json_body(second).await["id"].as_str().unwrap().to_string();
 
-    // viewing a document hands out the cookie its subresources need, because a
-    // sandboxed page sends no SameSite=Lax cookie of its own
+    // the session opens the app, and only the app: on the docs origin it reads
+    // as nobody, which is what a browser would present there anyway
     let response = call(
         &app,
         Method::GET,
@@ -1476,39 +1856,41 @@ async fn the_assets_cookie_is_bound_to_one_document() {
         with_cookie(&cookie),
     )
     .await;
-    let assets = response
-        .headers()
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .map(|value| {
-            value
-                .to_str()
-                .unwrap()
-                .split(';')
-                .next()
-                .unwrap()
-                .to_string()
-        })
-        .find(|value| value.starts_with("doc_assets="))
-        .expect("the document page issues an assets cookie");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
+    // the grant does read, and the document's files come with it, since they are
+    // its own subresources on its own origin
+    let reader = reader_cookie(&app, &cookie, &format!("/{first_id}/first/")).await;
+    for path in [
+        format!("/{first_id}/first/"),
+        format!("/{first_id}/first/a.css"),
+        format!("/{second_id}/second/b.css"),
+    ] {
+        let response = call(&app, Method::GET, &path, None, with_cookie(&reader)).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
+
+    // and it reads as one account, not as anyone who holds one
+    let invite = call(
+        &app,
+        Method::POST,
+        "/api/invites",
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    let code = json_body(invite).await["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let other = session_cookie_of(&register(&app, "other", Some(&code)).await);
+    let theirs = reader_cookie(&app, &other, &format!("/{first_id}/first/")).await;
     let response = call(
         &app,
         Method::GET,
         &format!("/{first_id}/first/a.css"),
         None,
-        with_cookie(&assets),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // the same cookie is worthless against another document
-    let response = call(
-        &app,
-        Method::GET,
-        &format!("/{second_id}/second/b.css"),
-        None,
-        with_cookie(&assets),
+        with_cookie(&theirs),
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -1746,7 +2128,10 @@ async fn a_large_body_lands_in_the_bucket_and_still_reads_back() {
 
     let filler = "x".repeat(crate::blobs::INLINE_LIMIT as usize + 1);
     let html = format!("<h1>big</h1><!--{filler}-->");
-    assert_eq!(push(&app, &token, "big", &html).await.status(), StatusCode::OK);
+    assert_eq!(
+        push(&app, &token, "big", &html).await.status(),
+        StatusCode::OK
+    );
 
     let (content, object_key): (Option<Vec<u8>>, Option<String>) =
         sqlx::query_as("SELECT content, object_key FROM revision_files WHERE path = 'index.html'")
@@ -1766,7 +2151,11 @@ async fn a_large_body_lands_in_the_bucket_and_still_reads_back() {
     .await;
     assert_eq!(raw.status(), StatusCode::OK);
     assert!(
-        raw.into_body().into_string().await.unwrap().contains("<h1>big</h1>"),
+        raw.into_body()
+            .into_string()
+            .await
+            .unwrap()
+            .contains("<h1>big</h1>"),
         "the raw route should resolve the body out of the bucket"
     );
 }
@@ -1806,7 +2195,11 @@ async fn the_sweep_demotes_superseded_revisions_only() {
     .await;
     assert_eq!(old.status(), StatusCode::OK);
     assert!(
-        old.into_body().into_string().await.unwrap().contains("<h1>first</h1>"),
+        old.into_body()
+            .into_string()
+            .await
+            .unwrap()
+            .contains("<h1>first</h1>"),
         "a superseded revision must read back out of the bucket"
     );
 }
@@ -1859,7 +2252,14 @@ async fn a_project_is_deletable_only_once_it_is_empty() {
     .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let projects = call(&app, Method::GET, "/api/projects", None, with_bearer(&token)).await;
+    let projects = call(
+        &app,
+        Method::GET,
+        "/api/projects",
+        None,
+        with_bearer(&token),
+    )
+    .await;
     let names: Vec<String> = json_body(projects)
         .await
         .as_array()
@@ -1942,10 +2342,20 @@ async fn a_public_asset_serves_from_the_bucket() {
         &app,
         &token,
         "shot",
-        &[("index.html", "<h1>entry</h1>"), ("style.css", "h1{color:red}")],
+        &[
+            ("index.html", "<h1>entry</h1>"),
+            ("style.css", "h1{color:red}"),
+        ],
     )
     .await;
-    let detail = call(&app, Method::GET, "/api/docs/shot", None, with_bearer(&token)).await;
+    let detail = call(
+        &app,
+        Method::GET,
+        "/api/docs/shot",
+        None,
+        with_bearer(&token),
+    )
+    .await;
     let id = json_body(detail).await["id"].as_str().unwrap().to_string();
 
     // push a second revision so the first goes cold, then sweep it out
@@ -1966,7 +2376,7 @@ async fn a_public_asset_serves_from_the_bucket() {
         Method::GET,
         &format!("/{id}/shot/rev/1/style.css"),
         None,
-        with_cookie(&cookie),
+        with_bearer(&token),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -1997,7 +2407,10 @@ async fn a_documents_own_icon_wins_over_the_projects() {
         .header(header::AUTHORIZATION, format!("Bearer {token}"))
         .content_type("application/octet-stream")
         .body(gif);
-    assert_eq!(app.get_response(request).await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.get_response(request).await.status(),
+        StatusCode::NO_CONTENT
+    );
 
     let bare = push_with_meta(
         &app,
@@ -2021,9 +2434,9 @@ async fn a_documents_own_icon_wins_over_the_projects() {
 
     let read = |path: String| {
         let app = &app;
-        let cookie = cookie.clone();
+        let token = token.clone();
         async move {
-            call(app, Method::GET, &path, None, with_cookie(&cookie))
+            call(app, Method::GET, &path, None, with_bearer(&token))
                 .await
                 .into_body()
                 .into_string()
@@ -2142,7 +2555,7 @@ async fn an_icon_still_precedes_a_document_that_has_no_head() {
         Method::GET,
         &format!("/{id}/headless/"),
         None,
-        with_cookie(&cookie),
+        with_bearer(&token),
     )
     .await
     .into_body()
@@ -2150,7 +2563,9 @@ async fn an_icon_still_precedes_a_document_that_has_no_head() {
     .await
     .unwrap();
 
-    let icon_at = html.find("data:image/gif;base64,").expect("the icon is present");
+    let icon_at = html
+        .find("data:image/gif;base64,")
+        .expect("the icon is present");
     let content_at = html.find("no head at all").expect("the content is present");
     assert!(
         icon_at < content_at,
@@ -2188,7 +2603,14 @@ async fn a_token_cannot_delete_or_rerender() {
     }
 
     // and the document is actually gone, not merely reported gone
-    let response = call(&app, Method::GET, "/api/docs/plan", None, with_bearer(&token)).await;
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan",
+        None,
+        with_bearer(&token),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
@@ -2202,8 +2624,14 @@ async fn deleting_frees_only_the_objects_nothing_else_holds() {
     let cookie = session_cookie_of(&register(&app, "admin", None).await);
     let token = agent_token(&app, &cookie).await;
 
-    let shared = format!("<h1>shared</h1><!--{}-->", "x".repeat(crate::blobs::INLINE_LIMIT as usize));
-    let lonely = format!("<h1>lonely</h1><!--{}-->", "y".repeat(crate::blobs::INLINE_LIMIT as usize));
+    let shared = format!(
+        "<h1>shared</h1><!--{}-->",
+        "x".repeat(crate::blobs::INLINE_LIMIT as usize)
+    );
+    let lonely = format!(
+        "<h1>lonely</h1><!--{}-->",
+        "y".repeat(crate::blobs::INLINE_LIMIT as usize)
+    );
     push(&app, &token, "keeper", &shared).await;
     push(&app, &token, "doomed", &shared).await;
     push(&app, &token, "doomed-only", &lonely).await;
@@ -2225,7 +2653,11 @@ async fn deleting_frees_only_the_objects_nothing_else_holds() {
     };
     let shared_key = key_of("keeper").await;
     let lonely_key = key_of("doomed-only").await;
-    assert_eq!(shared_key, key_of("doomed").await, "identical bodies share one object");
+    assert_eq!(
+        shared_key,
+        key_of("doomed").await,
+        "identical bodies share one object"
+    );
 
     for slug in ["doomed", "doomed-only"] {
         let response = call(

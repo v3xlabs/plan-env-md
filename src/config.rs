@@ -1,7 +1,8 @@
 pub struct Config {
     pub bind: String,
     pub database_url: String,
-    pub base_url: String,
+    pub app_url: Origin,
+    pub docs_url: Origin,
     pub secret: String,
     /// None when S3_BUCKET is unset, which keeps every blob inline.
     pub bucket: Option<Bucket>,
@@ -47,15 +48,41 @@ fn endpoint(host: &str, port: Option<&str>) -> String {
     }
 }
 
-/// Public origin used to build document URLs in API responses.
+/// One of the two origins this service answers on.
+///
+/// They are separate origins and not one host with two paths because a document
+/// runs its author's scripts. Keeping documents off the app's origin is what
+/// stops those scripts from reaching the session, the API, or each other's
+/// cookies, and it is what lets a document load its own uploaded files as
+/// ordinary same-origin subresources.
 #[derive(Clone)]
-pub struct BaseUrl(pub String);
+pub struct Origin(pub String);
 
-impl BaseUrl {
+impl Origin {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn is_https(&self) -> bool {
         self.0.starts_with("https://")
     }
+
+    /// Host and port, as a request's `Host` header spells them.
+    pub fn authority(&self) -> &str {
+        self.0
+            .split_once("://")
+            .map_or(self.0.as_str(), |(_, rest)| rest)
+            .trim_end_matches('/')
+    }
 }
+
+/// Where the app lives: the SPA, the API and the session.
+#[derive(Clone)]
+pub struct AppUrl(pub Origin);
+
+/// Where documents and their files live.
+#[derive(Clone)]
+pub struct DocsUrl(pub Origin);
 
 /// Server secret that signs visitor access cookies.
 #[derive(Clone)]
@@ -64,11 +91,14 @@ pub struct Secret(pub String);
 pub const DEV_SECRET: &str = "insecure-dev-secret";
 
 impl Config {
+    /// The two development defaults are one port under two hostnames, which is
+    /// all a browser needs to treat them as separate origins.
     pub fn from_env() -> Config {
         Config {
             bind: env_or("BIND", "127.0.0.1:3000"),
             database_url: env_or("DATABASE_URL", "sqlite://data/dev.db"),
-            base_url: env_or("BASE_URL", "http://127.0.0.1:3000"),
+            app_url: Origin(env_or("APP_URL", "http://127.0.0.1:3000")),
+            docs_url: Origin(env_or("DOCS_URL", "http://localhost:3000")),
             secret: env_or("SECRET", DEV_SECRET),
             bucket: Bucket::from_env(),
         }

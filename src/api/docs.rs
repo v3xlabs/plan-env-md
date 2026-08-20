@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use poem::web::{Data, Multipart};
 use poem::{FromRequest, Request, RequestBody};
 use poem_openapi::error::ContentTypeError;
@@ -14,7 +16,7 @@ use crate::api::question::{self, Answer, AnsweredQuestion, Question};
 use crate::api::upload::{self, ENTRY_PATH, MAX_ENTRY_BYTES, UploadedFile};
 use crate::api::{blob_failed, internal, is_unique_violation};
 use crate::auth::{self, Auth, AuthUser, SessionAuth};
-use crate::config::{BaseUrl, Secret};
+use crate::config::{DocsUrl, Secret};
 
 const PUBLIC_ID_LEN: usize = 10;
 const META_PART: &str = "meta";
@@ -207,6 +209,19 @@ struct PushedBody {
     revision: i64,
     size_bytes: i64,
     url: String,
+    /// Every file the revision holds, as stored. A caller that linked an asset
+    /// from the entry document compares its href against these paths to see
+    /// that the file arrived and arrived where the link points.
+    files: Vec<FileBody>,
+}
+
+/// One file of a revision, at the path it is served from under the document's
+/// directory URL.
+#[derive(Object)]
+struct FileBody {
+    path: String,
+    size_bytes: i64,
+    content_type: String,
 }
 
 #[derive(Object)]
@@ -214,6 +229,7 @@ struct RevisionBody {
     revision: i64,
     size_bytes: i64,
     created_at: String,
+    files: Vec<FileBody>,
 }
 
 #[derive(Object)]
@@ -330,12 +346,12 @@ struct AnswerRequest {
     notes: Option<String>,
 }
 
-// The widget calls from the document's opaque origin, so every answer response
-// carries Access-Control-Allow-Origin. There is deliberately no
-// Allow-Credentials: the scoped key travels in a header, not a cookie, so the
-// request is uncredentialed and `null` stays safe to allow.
-fn cors() -> String {
-    "null".to_string()
+// The widget calls from the docs origin, so every answer response says that
+// origin may read it. There is deliberately no Allow-Credentials: the scoped key
+// travels in a header rather than a cookie, so the request is uncredentialed and
+// allowing an origin here grants nothing a reader's browser would add to it.
+fn cors(docs_url: &DocsUrl) -> String {
+    docs_url.0.as_str().to_string()
 }
 
 #[derive(ApiResponse)]
@@ -451,7 +467,7 @@ impl DocsApi {
     async fn push(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
+        docs_url: Data<&DocsUrl>,
         blobs: Data<&Option<crate::blobs::Blobs>>,
         auth: Auth,
         slug: Path<String>,
@@ -630,13 +646,22 @@ impl DocsApi {
 
         tx.commit().await.map_err(internal)?;
 
-        let url = format!("{}/{}/{}", base_url.0.0, public_id, slug);
+        let url = format!("{}/{}/{}", docs_url.0.0.as_str(), public_id, slug);
         Ok(PushResponse::Ok(Json(PushedBody {
             id: public_id,
             slug,
             revision,
             size_bytes,
             url,
+            files: body
+                .files
+                .iter()
+                .map(|file| FileBody {
+                    path: file.path.clone(),
+                    size_bytes: file.content.len() as i64,
+                    content_type: file.content_type.to_string(),
+                })
+                .collect(),
         })))
     }
 
@@ -645,7 +670,7 @@ impl DocsApi {
     async fn list(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
+        docs_url: Data<&DocsUrl>,
         auth: Auth,
         /// Restrict to one project. An alias resolves to the project it names.
         project: Query<Option<String>>,
@@ -701,7 +726,7 @@ impl DocsApi {
         Ok(Json(
             rows.into_iter()
                 .map(|row| DocumentBody {
-                    url: format!("{}/{}/{}", base_url.0.0, row.public_id, row.slug),
+                    url: format!("{}/{}/{}", docs_url.0.0.as_str(), row.public_id, row.slug),
                     tags: tags.remove(&row.id).unwrap_or_default(),
                     id: row.public_id,
                     slug: row.slug,
@@ -725,11 +750,11 @@ impl DocsApi {
     async fn detail(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
+        docs_url: Data<&DocsUrl>,
         auth: Auth,
         slug: Path<String>,
     ) -> poem::Result<DocumentResponse> {
-        match document_detail(pool.0, base_url.0, auth.user().id, &slug.0).await? {
+        match document_detail(pool.0, docs_url.0, auth.user().id, &slug.0).await? {
             Some(body) => Ok(DocumentResponse::Ok(Json(Box::new(body)))),
             None => Ok(DocumentResponse::NotFound),
         }
@@ -808,7 +833,7 @@ impl DocsApi {
     async fn patch(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
+        docs_url: Data<&DocsUrl>,
         auth: Auth,
         slug: Path<String>,
         body: Json<PatchRequest>,
@@ -863,7 +888,7 @@ impl DocsApi {
         }
         tx.commit().await.map_err(internal)?;
 
-        match document_detail(pool.0, base_url.0, auth.user().id, &slug.0).await? {
+        match document_detail(pool.0, docs_url.0, auth.user().id, &slug.0).await? {
             Some(body) => Ok(PatchResponse::Ok(Json(Box::new(body)))),
             None => Ok(PatchResponse::NotFound),
         }
@@ -946,7 +971,7 @@ impl DocsApi {
     async fn publish(
         &self,
         pool: Data<&SqlitePool>,
-        base_url: Data<&BaseUrl>,
+        docs_url: Data<&DocsUrl>,
         session: SessionAuth,
         slug: Path<String>,
         body: Json<PublishRequest>,
@@ -971,7 +996,7 @@ impl DocsApi {
 
         Ok(match public_id {
             Some(public_id) => PublishResponse::Ok(Json(PublishedBody {
-                url: format!("{}/{}/{}", base_url.0.0, public_id, slug.0),
+                url: format!("{}/{}/{}", docs_url.0.0.as_str(), public_id, slug.0),
             })),
             None => PublishResponse::NotFound,
         })
@@ -1091,25 +1116,29 @@ impl DocsApi {
     async fn answer(
         &self,
         pool: Data<&SqlitePool>,
+        docs_url: Data<&DocsUrl>,
         grant: AnswerAuth,
         slug: Path<String>,
         key: Path<String>,
         body: Json<AnswerRequest>,
     ) -> poem::Result<AnswerResponse> {
         let Some(document_id) = resolve_answerable(pool.0, &grant, &slug.0).await? else {
-            return Ok(AnswerResponse::NotFound(cors()));
+            return Ok(AnswerResponse::NotFound(cors(docs_url.0)));
         };
 
         let declared = latest_questions(pool.0, document_id).await?;
         let Some(question) = declared.into_iter().find(|q| q.key == key.0) else {
-            return Ok(AnswerResponse::NotFound(cors()));
+            return Ok(AnswerResponse::NotFound(cors(docs_url.0)));
         };
 
         let selected = body.0.selected;
         let other_text = body.0.other_text.filter(|text| !text.trim().is_empty());
         let notes = body.0.notes.filter(|text| !text.trim().is_empty());
         if let Err(message) = question::check_answer(&question, &selected, other_text.as_deref()) {
-            return Ok(AnswerResponse::Invalid(PlainText(message), cors()));
+            return Ok(AnswerResponse::Invalid(
+                PlainText(message),
+                cors(docs_url.0),
+            ));
         }
         if [other_text.as_deref(), notes.as_deref()]
             .into_iter()
@@ -1121,7 +1150,7 @@ impl DocsApi {
                     "text fields are limited to {} characters",
                     question::MAX_TEXT
                 )),
-                cors(),
+                cors(docs_url.0),
             ));
         }
 
@@ -1152,7 +1181,7 @@ impl DocsApi {
                 notes,
                 answered_at,
             }),
-            cors(),
+            cors(docs_url.0),
         ))
     }
 
@@ -1161,12 +1190,13 @@ impl DocsApi {
     async fn clear_answer(
         &self,
         pool: Data<&SqlitePool>,
+        docs_url: Data<&DocsUrl>,
         grant: AnswerAuth,
         slug: Path<String>,
         key: Path<String>,
     ) -> poem::Result<ClearAnswerResponse> {
         let Some(document_id) = resolve_answerable(pool.0, &grant, &slug.0).await? else {
-            return Ok(ClearAnswerResponse::NotFound(cors()));
+            return Ok(ClearAnswerResponse::NotFound(cors(docs_url.0)));
         };
         sqlx::query!(
             "DELETE FROM document_answers WHERE document_id = ? AND key = ?",
@@ -1176,15 +1206,20 @@ impl DocsApi {
         .execute(pool.0)
         .await
         .map_err(internal)?;
-        Ok(ClearAnswerResponse::Done(cors()))
+        Ok(ClearAnswerResponse::Done(cors(docs_url.0)))
     }
 
-    /// CORS preflight for the two answer routes. The widget calls from the
-    /// document's opaque origin, which presents `Origin: null`.
+    /// CORS preflight for the two answer routes. The widget calls from the docs
+    /// origin, which is not the origin this API answers on.
     #[oai(path = "/docs/:slug/answers/:key", method = "options")]
-    async fn answer_preflight(&self, _slug: Path<String>, _key: Path<String>) -> PreflightResponse {
+    async fn answer_preflight(
+        &self,
+        docs_url: Data<&DocsUrl>,
+        _slug: Path<String>,
+        _key: Path<String>,
+    ) -> PreflightResponse {
         PreflightResponse::Ok(
-            "null".to_string(),
+            cors(docs_url.0),
             "authorization, content-type".to_string(),
             "PUT, DELETE, OPTIONS".to_string(),
             "600".to_string(),
@@ -1218,7 +1253,7 @@ impl DocsApi {
 
 async fn document_detail(
     pool: &SqlitePool,
-    base_url: &BaseUrl,
+    docs_url: &DocsUrl,
     owner_id: i64,
     slug: &str,
 ) -> poem::Result<Option<DocumentDetailBody>> {
@@ -1247,6 +1282,25 @@ async fn document_detail(
     .await
     .map_err(internal)?;
 
+    let mut files: HashMap<i64, Vec<FileBody>> = HashMap::new();
+    for file in sqlx::query!(
+        r#"SELECT r.revision as "revision!: i64", f.path as "path!: String",
+                  f.size_bytes as "size_bytes!: i64", f.content_type as "content_type!: String"
+           FROM revision_files f JOIN revisions r ON r.id = f.revision_id
+           WHERE r.document_id = ? ORDER BY r.revision, f.path"#,
+        row.id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(internal)?
+    {
+        files.entry(file.revision).or_default().push(FileBody {
+            path: file.path,
+            size_bytes: file.size_bytes,
+            content_type: file.content_type,
+        });
+    }
+
     let tags = sqlx::query_scalar!(
         r#"SELECT tag as "tag!: String" FROM document_tags
            WHERE document_id = ? ORDER BY tag"#,
@@ -1257,7 +1311,7 @@ async fn document_detail(
     .map_err(internal)?;
 
     Ok(Some(DocumentDetailBody {
-        url: format!("{}/{}/{}", base_url.0, row.public_id, slug),
+        url: format!("{}/{}/{}", docs_url.0.as_str(), row.public_id, slug),
         id: row.public_id,
         slug: slug.to_string(),
         title: row.title,
@@ -1269,6 +1323,7 @@ async fn document_detail(
         revisions: revisions
             .into_iter()
             .map(|r| RevisionBody {
+                files: files.remove(&r.revision).unwrap_or_default(),
                 revision: r.revision,
                 size_bytes: r.size_bytes,
                 created_at: r.created_at,
