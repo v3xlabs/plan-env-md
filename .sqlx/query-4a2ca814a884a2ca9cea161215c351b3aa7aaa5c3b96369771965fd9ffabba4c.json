@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT (\n             EXISTS (SELECT 1 FROM revision_files WHERE object_key = ?)\n             OR EXISTS (SELECT 1 FROM revision_previews WHERE object_key = ?)\n           ) as \"referenced!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "referenced!: bool",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4a2ca814a884a2ca9cea161215c351b3aa7aaa5c3b96369771965fd9ffabba4c"
+}

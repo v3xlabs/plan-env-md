@@ -69,6 +69,16 @@ impl Blobs {
         Ok(bytes.to_vec())
     }
 
+    /// Removes an object. Only for a body no row points at any more: keys are
+    /// content addressed, so two documents holding identical bytes share one
+    /// object and the caller has to establish that before calling this.
+    pub async fn delete(&self, key: &str) -> Result<(), String> {
+        self.0
+            .delete(&Path::from(key))
+            .await
+            .map_err(|error| format!("cannot delete {key}: {error}"))
+    }
+
     /// Round trips a small object so a misconfigured bucket stops the server
     /// at startup instead of at the first push.
     pub async fn check(&self) -> Result<(), String> {

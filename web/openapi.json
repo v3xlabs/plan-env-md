@@ -754,6 +754,35 @@
           }
         ]
       },
+      "delete": {
+        "summary": "Delete a document, its revisions and their bodies.",
+        "description": "Signed in only, like publishing. An agent's token can create and revise\nbut cannot destroy, so a confused agent cannot take a document with it.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "No document with this slug on this account"
+          }
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
       "patch": {
         "summary": "Correct a document's title, project or tags without pushing a revision.\nThis is how documents pushed before projects existed get sorted.",
         "parameters": [
@@ -1163,9 +1192,6 @@
           }
         },
         "security": [
-          {
-            "BearerAuth": []
-          },
           {
             "SessionAuth": []
           }

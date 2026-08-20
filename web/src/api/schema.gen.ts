@@ -816,7 +816,37 @@ export interface paths {
             };
         };
         post?: never;
-        delete?: never;
+        /**
+         * Delete a document, its revisions and their bodies.
+         * @description Signed in only, like publishing. An agent's token can create and revise
+         *     but cannot destroy, so a confused agent cannot take a document with it.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No document with this slug on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         options?: never;
         head?: never;
         /**

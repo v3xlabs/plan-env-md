@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM documents WHERE owner_id = ? AND slug = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a6de545351e0e8040463bf68fb341583fccf00ba3b0b4e96d65c43778e1b15fc"
+}

@@ -1,9 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { createFileRoute, Link } from "@tanstack/solid-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/solid-router";
 import clsx from "clsx";
 import { createSignal, For, Show, Suspense } from "solid-js";
 
-import { documentQueryOptions, publishDocument, unpublishDocument } from "../api/documents";
+import {
+  deleteDocument,
+  documentQueryOptions,
+  publishDocument,
+  refreshPreview,
+  unpublishDocument,
+} from "../api/documents";
 import { projectsQueryOptions } from "../api/projects";
 import { Button } from "../components/Button";
 import { CopyBlock } from "../components/CopyBlock";
@@ -48,6 +54,7 @@ const linkWithPassword = (url: string, password: string) =>
 const DocumentPage = () => {
   const parameters = Route.useParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const detail = useQuery(() => documentQueryOptions(parameters().slug));
   const projects = useQuery(() => projectsQueryOptions);
 
@@ -60,6 +67,7 @@ const DocumentPage = () => {
   };
 
   const [isShareOpen, setShareOpen] = createSignal(false);
+  const [isDeleteOpen, setDeleteOpen] = createSignal(false);
   /// A published document shows its controls first; the password field only
   /// appears once the reader asks to replace the password.
   const [isRotating, setRotating] = createSignal(false);
@@ -93,6 +101,29 @@ const DocumentPage = () => {
     },
   }));
 
+  const rerender = useMutation(() => ({
+    mutationFn: refreshPreview,
+    onSuccess: invalidate,
+  }));
+
+  /// The worker renders in the background, so the button reports that the job
+  /// was accepted rather than pretending the picture has already changed.
+  const rerenderLabel = () => {
+    if (rerender.isPending) return "queueing";
+
+    if (rerender.isError) return "could not queue";
+
+    return rerender.isSuccess ? "queued, reload shortly" : "re-render preview";
+  };
+
+  const remove = useMutation(() => ({
+    mutationFn: deleteDocument,
+    onSuccess: async () => {
+      invalidate();
+      await navigate({ to: "/" });
+    },
+  }));
+
   /// Generates a password, publishes with it, and puts the ready to send link
   /// on the clipboard, for when none of the three steps are interesting.
   const shareInOneStep = async (slug: string) => {
@@ -110,11 +141,24 @@ const DocumentPage = () => {
         {document => (
           <div class="space-y-8">
             <header class="flex flex-wrap items-start gap-5">
-              <Thumbnail
-                slug={document().slug}
-                href={document().url}
-                class="h-40 w-64"
-              />
+              <div class="shrink-0 space-y-1.5">
+                <Thumbnail
+                  slug={document().slug}
+                  href={document().url}
+                  class="h-40 w-64"
+                />
+                {/* beside the thumbnail, because the thumbnail is the thing it
+                    is about: a preview captured before the page's own assets
+                    existed stays wrong until it is asked for again */}
+                <button
+                  type="button"
+                  disabled={rerender.isPending}
+                  onClick={() => rerender.mutate(document().slug)}
+                  class="font-mono text-xs text-muted hover:text-accent disabled:opacity-50"
+                >
+                  {rerenderLabel()}
+                </button>
+              </div>
 
               <div class="min-w-0 flex-1 space-y-2">
                 <Show when={document().project}>
@@ -216,6 +260,54 @@ const DocumentPage = () => {
                 published.
               </p>
             </section>
+
+            <section>
+              <h2 class="mb-2 font-mono text-xs tracking-wide text-muted uppercase">
+                Delete this document
+              </h2>
+              <div class="flex items-center gap-3">
+                <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+                  Delete
+                </Button>
+                <p class="min-w-0 flex-1 text-xs text-muted">
+                  Every revision goes with it, including the links people already
+                  hold. This cannot be undone.
+                </p>
+              </div>
+            </section>
+
+            <Modal
+              title="Delete this document"
+              isOpen={isDeleteOpen()}
+              onOpenChange={setDeleteOpen}
+            >
+              <div class="space-y-4">
+                <p class="text-sm text-muted">
+                  {document().title ?? document().slug}
+                  {" and its "}
+                  {document().revisions.length}
+                  {document().revisions.length === 1 ? " revision" : " revisions"}
+                  {" are removed. Anyone holding a link gets nothing. This cannot be undone."}
+                </p>
+                <Show when={remove.error}>
+                  {error => (
+                    <p class="text-sm text-red-700 dark:text-red-400">{error().message}</p>
+                  )}
+                </Show>
+                <div class="flex justify-end gap-2">
+                  <Button variant="quiet" onClick={() => setDeleteOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate(document().slug)}
+                  >
+                    {remove.isPending ? "Deleting" : "Delete"}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
 
             <Modal title="Share" isOpen={isShareOpen()} onOpenChange={setShareOpen}>
               <div class="space-y-4">

@@ -57,3 +57,20 @@ export const unpublishDocument = async (slug: string): Promise<void> => {
 
   if (response.status !== 204) throw new Error(`Unpublish failed (status ${response.status})`);
 };
+
+export const deleteDocument = async (slug: string): Promise<void> => {
+  const response = await api("/api/docs/{slug}", "delete", { path: { slug } });
+
+  if (response.status !== 204) throw new Error(`Delete failed (status ${response.status})`);
+};
+
+/// Queues the latest revision to be rendered again. A stored preview is never
+/// revisited on its own, so one captured before the page's assets existed stays
+/// wrong until asked for.
+export const refreshPreview = async (slug: string): Promise<void> => {
+  const response = await api("/api/docs/{slug}/preview/refresh", "post", {
+    path: { slug },
+  });
+
+  if (response.status !== 202) throw new Error(`Re-render failed (status ${response.status})`);
+};

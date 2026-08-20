@@ -352,6 +352,15 @@ enum PreviewImageResponse {
 }
 
 #[derive(ApiResponse)]
+enum DeleteDocumentResponse {
+    #[oai(status = 204)]
+    Done,
+    /// No document with this slug on this account
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
 enum RefreshPreviewResponse {
     #[oai(status = 202)]
     Queued,
@@ -726,6 +735,73 @@ impl DocsApi {
         }
     }
 
+    /// Delete a document, its revisions and their bodies.
+    ///
+    /// Signed in only, like publishing. An agent's token can create and revise
+    /// but cannot destroy, so a confused agent cannot take a document with it.
+    #[oai(path = "/docs/:slug", method = "delete")]
+    async fn delete(
+        &self,
+        pool: Data<&SqlitePool>,
+        blobs: Data<&Option<crate::blobs::Blobs>>,
+        session: SessionAuth,
+        slug: Path<String>,
+    ) -> poem::Result<DeleteDocumentResponse> {
+        // gathered before the rows go: afterwards there is nothing left to say
+        // which objects this document was holding
+        let keys = sqlx::query_scalar!(
+            r#"SELECT object_key as "object_key!: String" FROM revision_files f
+               JOIN revisions r ON r.id = f.revision_id
+               JOIN documents d ON d.id = r.document_id
+               WHERE d.owner_id = ? AND d.slug = ? AND f.object_key IS NOT NULL
+               UNION
+               SELECT object_key as "object_key!: String" FROM revision_previews p
+               JOIN revisions r ON r.id = p.revision_id
+               JOIN documents d ON d.id = r.document_id
+               WHERE d.owner_id = ? AND d.slug = ? AND p.object_key IS NOT NULL"#,
+            session.0.id,
+            slug.0,
+            session.0.id,
+            slug.0
+        )
+        .fetch_all(pool.0)
+        .await
+        .map_err(internal)?;
+
+        // revisions cascade from the document, and files and previews from the
+        // revision, so one delete takes the whole tree
+        let deleted = sqlx::query!(
+            "DELETE FROM documents WHERE owner_id = ? AND slug = ?",
+            session.0.id,
+            slug.0
+        )
+        .execute(pool.0)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if deleted == 0 {
+            return Ok(DeleteDocumentResponse::NotFound);
+        }
+
+        // the rows are already gone, so a bucket that will not cooperate leaves
+        // an orphan object rather than failing the delete the reader asked for
+        if let Some(blobs) = blobs.0 {
+            for key in keys {
+                match still_referenced(pool.0, &key).await {
+                    Ok(true) => continue,
+                    Ok(false) => {
+                        if let Err(error) = blobs.delete(&key).await {
+                            tracing::warn!(%key, %error, "orphaned an object");
+                        }
+                    }
+                    Err(error) => tracing::warn!(%key, %error, "cannot tell if an object is free"),
+                }
+            }
+        }
+
+        Ok(DeleteDocumentResponse::Done)
+    }
+
     /// Correct a document's title, project or tags without pushing a revision.
     /// This is how documents pushed before projects existed get sorted.
     #[oai(path = "/docs/:slug", method = "patch")]
@@ -958,7 +1034,7 @@ impl DocsApi {
     async fn refresh_preview(
         &self,
         pool: Data<&SqlitePool>,
-        auth: Auth,
+        session: SessionAuth,
         slug: Path<String>,
     ) -> poem::Result<RefreshPreviewResponse> {
         let revision_id = sqlx::query_scalar!(
@@ -966,7 +1042,7 @@ impl DocsApi {
                JOIN documents d ON d.id = r.document_id
                WHERE d.owner_id = ? AND d.slug = ?
                ORDER BY r.revision DESC LIMIT 1"#,
-            auth.user().id,
+            session.0.id,
             slug.0
         )
         .fetch_optional(pool.0)
@@ -1306,6 +1382,26 @@ pub fn valid_slug(slug: &str) -> bool {
         && slug
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// Whether any row still points at an object.
+///
+/// A key is the hash of its contents, so two documents that ship the same
+/// image share one object. Deleting on the strength of one document's rows
+/// would pull the bytes out from under the other, which is why this is checked
+/// across every owner rather than only the one deleting.
+async fn still_referenced(pool: &SqlitePool, key: &str) -> Result<bool, sqlx::Error> {
+    let count = sqlx::query_scalar!(
+        r#"SELECT (
+             EXISTS (SELECT 1 FROM revision_files WHERE object_key = ?)
+             OR EXISTS (SELECT 1 FROM revision_previews WHERE object_key = ?)
+           ) as "referenced!: bool""#,
+        key,
+        key
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
 }
 
 /// A project exists because a document names it. The row carries its settings,

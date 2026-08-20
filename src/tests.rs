@@ -1719,7 +1719,7 @@ async fn refreshing_a_preview_requeues_a_stored_one() {
         Method::POST,
         "/api/docs/plan/preview/refresh",
         None,
-        with_bearer(&token),
+        with_cookie(&cookie),
     )
     .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -1729,7 +1729,7 @@ async fn refreshing_a_preview_requeues_a_stored_one() {
         Method::POST,
         "/api/docs/nothing/preview/refresh",
         None,
-        with_bearer(&token),
+        with_cookie(&cookie),
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -2155,5 +2155,96 @@ async fn an_icon_still_precedes_a_document_that_has_no_head() {
     assert!(
         icon_at < content_at,
         "the icon must precede the content so the parser keeps it in the head it builds"
+    );
+}
+
+/// Destroying is a signed-in action. An agent's token can create and revise but
+/// must not be able to delete a document or requeue its render.
+#[tokio::test]
+async fn a_token_cannot_delete_or_rerender() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push(&app, &token, "plan", "<h1>plan</h1>").await;
+
+    for (method, path) in [
+        (Method::POST, "/api/docs/plan/preview/refresh"),
+        (Method::DELETE, "/api/docs/plan"),
+    ] {
+        let response = call(&app, method.clone(), path, None, with_bearer(&token)).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "a token must not reach {path}"
+        );
+        // refresh before delete: the other order asks the server to requeue a
+        // document that is no longer there
+        let response = call(&app, method, path, None, with_cookie(&cookie)).await;
+        assert!(
+            response.status().is_success(),
+            "a session must reach {path}, got {}",
+            response.status()
+        );
+    }
+
+    // and the document is actually gone, not merely reported gone
+    let response = call(&app, Method::GET, "/api/docs/plan", None, with_bearer(&token)).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// Deleting takes the document's objects with it, but only those no other
+/// document still points at. Keys are content addressed, so identical bodies
+/// share one object and deleting eagerly would empty someone else's document.
+#[tokio::test]
+async fn deleting_frees_only_the_objects_nothing_else_holds() {
+    let blobs = crate::blobs::Blobs::in_memory();
+    let (app, pool, _) = test_app_with_blobs(Some(blobs.clone())).await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let shared = format!("<h1>shared</h1><!--{}-->", "x".repeat(crate::blobs::INLINE_LIMIT as usize));
+    let lonely = format!("<h1>lonely</h1><!--{}-->", "y".repeat(crate::blobs::INLINE_LIMIT as usize));
+    push(&app, &token, "keeper", &shared).await;
+    push(&app, &token, "doomed", &shared).await;
+    push(&app, &token, "doomed-only", &lonely).await;
+
+    let key_of = |slug: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT f.object_key FROM revision_files f
+                 JOIN revisions r ON r.id = f.revision_id
+                 JOIN documents d ON d.id = r.document_id
+                 WHERE d.slug = ?",
+            )
+            .bind(slug)
+            .fetch_one(&pool)
+            .await
+            .expect("a key")
+        }
+    };
+    let shared_key = key_of("keeper").await;
+    let lonely_key = key_of("doomed-only").await;
+    assert_eq!(shared_key, key_of("doomed").await, "identical bodies share one object");
+
+    for slug in ["doomed", "doomed-only"] {
+        let response = call(
+            &app,
+            Method::DELETE,
+            &format!("/api/docs/{slug}"),
+            None,
+            with_cookie(&cookie),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    assert!(
+        blobs.get(&shared_key).await.is_ok(),
+        "the object keeper still points at must survive"
+    );
+    assert!(
+        blobs.get(&lonely_key).await.is_err(),
+        "the object nothing points at must be gone"
     );
 }
