@@ -541,15 +541,7 @@ async fn document_page(
 
     body.extend_from_slice(
         overlay_fragment(
-            app_url,
-            docs_url,
-            &share,
-            public_id,
-            doc,
-            current,
-            latest,
-            &revisions,
-            &questions,
+            app_url, docs_url, &share, public_id, doc, current, latest, &revisions, &questions,
         )
         .as_bytes(),
     );
@@ -626,14 +618,34 @@ fn overlay_fragment(
         format!("rev {current} of {latest}")
     };
 
-    // the count is rendered rather than left at zero for the widget to correct,
-    // so the pill agrees with the document list before any script runs
+    // the count and the segments are rendered rather than left for the widget to
+    // fill in, so the control agrees with the document list before any script
+    // runs, and so it is not a blank pill while the module loads
     let answered = if questions.is_empty() {
         String::new()
     } else {
         let count = questions.iter().filter(|q| q.answer.is_some()).count();
         let total = questions.len();
-        format!(r#"<span id="planenv-answered">{count} of {total} answered</span>"#)
+        let segments: String = questions
+            .iter()
+            .map(|q| {
+                if q.answer.is_some() {
+                    r#"<i class="is-on"></i>"#
+                } else {
+                    "<i></i>"
+                }
+            })
+            .collect();
+        // one segment per question says how many there are as well as how far
+        // along the reader is, which a single bar cannot
+        let done = if count == total {
+            " class=\"is-done\""
+        } else {
+            ""
+        };
+        format!(
+            r#"<div id="planenv-progress"{done} title="{count} of {total} answered"><span id="planenv-answered">{count} of {total}</span><span id="planenv-nav"><button type="button" class="planenv-step" data-planenv-step="-1" aria-label="Previous question">&#8592;</button><button type="button" class="planenv-step" data-planenv-step="1" aria-label="Next question">&#8594;</button></span><b id="planenv-done">?</b><span id="planenv-track">{segments}</span></div>"#
+        )
     };
 
     format!(
@@ -656,7 +668,7 @@ fn overlay_fragment(
   font: 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
 }}
 #planenv-tools {{ display: flex; gap: 6px; align-items: stretch; }}
-#planenv-overlay a, #planenv-overlay summary, #planenv-answered {{
+#planenv-overlay a, #planenv-overlay summary, #planenv-progress {{
   pointer-events: auto;
   display: flex; align-items: center;
   background: #1c1f22e8; color: #e7e5df;
@@ -681,6 +693,47 @@ fn overlay_fragment(
 #planenv-revs nav a:hover {{ background: #ffffff14; }}
 #planenv-revs nav a.viewing {{ color: #4cc2a0; }}
 #planenv-share {{ background: #4cc2a0; border-color: transparent; color: #10201b; font-weight: 600; }}
+
+/* The answer control. Its padding matches the pills beside it and its track is
+   out of flow, so it is exactly their height in every state, including the
+   square it collapses to. */
+#planenv-progress {{ position: relative; gap: 10px; padding: 7px 10px; }}
+#planenv-answered {{ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }}
+#planenv-nav {{ display: flex; gap: 4px; }}
+.planenv-step {{
+  width: 16px; height: 16px; display: grid; place-items: center;
+  border: 1px solid #ffffff2e; background: none; color: inherit;
+  font: 10px/1 system-ui, sans-serif; cursor: pointer; padding: 0;
+}}
+.planenv-step:hover, .planenv-step:focus-visible {{ background: #4cc2a0; border-color: #4cc2a0; color: #10201b; outline: 0; }}
+.planenv-step[disabled] {{ opacity: .3; cursor: default; }}
+.planenv-step[disabled]:hover {{ background: none; border-color: #ffffff2e; color: inherit; }}
+/* flush to the bottom, edge to edge, resting on the border rather than being it */
+#planenv-track {{ position: absolute; left: 0; right: 0; bottom: 0; height: 2px; display: flex; gap: 1px; }}
+#planenv-track i {{ flex: 1; background: #ffffff26; }}
+#planenv-track i.is-on {{ background: #4cc2a0; }}
+#planenv-done {{ display: none; color: #ffffff; font-size: 14px; line-height: 1; }}
+
+/* Answered in full: the control keeps the height and gives up the width, and
+   hover or focus hands every part of it back. Reduced motion lands on the same
+   square without the step in between, so the square has to read on its own. */
+#planenv-progress.is-done {{
+  width: 28px; padding: 0; gap: 0; justify-content: center;
+  background: #4cc2a0; border-color: #4cc2a0;
+  transition: width 160ms, background-color 160ms;
+}}
+#planenv-progress.is-done > :not(#planenv-done) {{ display: none; }}
+#planenv-progress.is-done #planenv-done {{ display: block; }}
+#planenv-progress.is-done:hover, #planenv-progress.is-done:focus-within {{
+  width: auto; padding: 7px 10px; gap: 10px;
+  background: #1c1f22e8; border-color: #ffffff26;
+}}
+#planenv-progress.is-done:hover > :not(#planenv-done), #planenv-progress.is-done:focus-within > :not(#planenv-done) {{ display: flex; }}
+#planenv-progress.is-done:hover #planenv-answered, #planenv-progress.is-done:focus-within #planenv-answered {{ display: block; }}
+#planenv-progress.is-done:hover #planenv-done, #planenv-progress.is-done:focus-within #planenv-done {{ display: none; }}
+@media (prefers-reduced-motion: reduce) {{
+  #planenv-progress.is-done {{ transition: none; }}
+}}
 @media print {{ #planenv-overlay {{ display: none; }} }}
 </style>
 "#
@@ -770,6 +823,10 @@ async fn favicon_fragment(pool: &SqlitePool, owner_id: i64, project: &str) -> St
 /// widget write answers from the docs origin, where the session cookie is never
 /// sent. The API it writes to lives on the app origin, so the widget is handed
 /// that address rather than resolving one relative to the document.
+///
+/// The stylesheet is inlined rather than linked, like the overlay's is. A linked
+/// one is a second request that can fail on its own, and a widget whose script
+/// arrived without its styles renders as unstyled controls in the document.
 fn answer_widget_fragment(
     app_url: &AppUrl,
     secret: &Secret,
@@ -788,10 +845,11 @@ fn answer_widget_fragment(
 
     format!(
         r#"
-<link rel="stylesheet" href="/_planenv/answer.css">
+<style>{css}</style>
 <script type="application/json" id="planenv-questions">{data}</script>
 <script src="/_planenv/answer.js" data-planenv-key="{key}" data-planenv-slug="{slug}" data-planenv-api="{app}"></script>
-"#
+"#,
+        css = include_str!("answer.css"),
     )
 }
 

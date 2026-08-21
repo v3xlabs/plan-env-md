@@ -30,13 +30,53 @@ const state = new Map(
 );
 
 const timers = new Map();
+const cards = new Map();
+const markers = new Map();
+let current = questions[0]?.key;
 
-const answeredCount = () =>
-  [...state.values()].filter((answer) => answer.selected.length > 0).length;
+const isAnswered = (key) => state.get(key).selected.length > 0;
+const answeredCount = () => questions.filter((entry) => isAnswered(entry.key)).length;
 
-const updateCounter = () => {
-  const counter = document.getElementById("planenv-answered");
-  if (counter) counter.textContent = `${answeredCount()} of ${questions.length} answered`;
+const paint = (key) => {
+  const answered = isAnswered(key);
+  cards.get(key)?.classList.toggle("is-answered", answered);
+  markers.get(key)?.classList.toggle("is-answered", answered);
+};
+
+const updateProgress = () => {
+  const progress = document.getElementById("planenv-progress");
+  if (!progress) return;
+
+  const count = answeredCount();
+  const total = questions.length;
+  const label = document.getElementById("planenv-answered");
+  if (label) label.textContent = `${count} of ${total}`;
+  progress.title = `${count} of ${total} answered`;
+  progress.classList.toggle("is-done", count === total);
+
+  const track = document.getElementById("planenv-track");
+  if (!track) return;
+  [...track.children].forEach((segment, index) => {
+    segment.classList.toggle("is-on", isAnswered(questions[index].key));
+  });
+};
+
+const reveal = (key) => {
+  const card = cards.get(key);
+  if (!card) return;
+  current = key;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.focus({ preventScroll: true });
+};
+
+/// The arrows walk what is still open, since that is what the count beside them
+/// counts. With nothing left they walk everything, so the control stays a way
+/// back to what was decided.
+const step = (direction) => {
+  const open = questions.filter((entry) => !isAnswered(entry.key));
+  const walk = open.length > 0 ? open : questions;
+  const here = walk.findIndex((entry) => entry.key === current);
+  reveal(walk[(here + direction + walk.length) % walk.length].key);
 };
 
 const request = (method, key, body) =>
@@ -56,7 +96,6 @@ const save = (card, key) => {
     setTimeout(async () => {
       const answer = state.get(key);
       const status = card.querySelector(".planenv-status");
-      const wroteOther = answer.selected.includes(OTHER);
 
       // an empty selection is a withdrawal, which is a different state from an
       // answer with nothing chosen
@@ -64,11 +103,7 @@ const save = (card, key) => {
         status.textContent = "clearing";
         const response = await request("DELETE", key);
         status.textContent = response.ok ? "not answered" : "not saved";
-        updateCounter();
-        return;
-      }
-      if (wroteOther && !answer.otherText.trim()) {
-        status.textContent = "write your answer";
+        updateProgress();
         return;
       }
 
@@ -77,7 +112,7 @@ const save = (card, key) => {
       try {
         response = await request("PUT", key, {
           selected: answer.selected,
-          other_text: wroteOther ? answer.otherText : null,
+          other_text: answer.selected.includes(OTHER) ? answer.otherText : null,
           notes: answer.notes || null,
         });
       } catch {
@@ -94,32 +129,24 @@ const save = (card, key) => {
         return;
       }
       status.textContent = "saved just now";
-      updateCounter();
+      updateProgress();
     }, SAVE_DELAY),
   );
 };
 
-const toggle = (key, value, multiple) => {
-  const answer = state.get(key);
-  if (!multiple) {
-    answer.selected = answer.selected[0] === value ? [] : [value];
-    return;
-  }
-  answer.selected = answer.selected.includes(value)
-    ? answer.selected.filter((entry) => entry !== value)
-    : [...answer.selected, value];
-};
-
-const buildCard = (entry) => {
+const buildCard = (entry, ordinal) => {
   const answer = state.get(entry.key);
   const card = document.createElement("aside");
   card.className = "planenv-q";
   card.dataset.key = entry.key;
+  card.tabIndex = -1;
 
   const head = document.createElement("header");
-  head.innerHTML = `<b class="planenv-q-key"></b><span class="planenv-q-prompt"></span>`;
-  head.querySelector(".planenv-q-key").textContent = entry.key;
+  head.innerHTML =
+    `<b class="planenv-q-key"></b><span class="planenv-q-prompt"></span><span class="planenv-q-how"></span>`;
+  head.querySelector(".planenv-q-key").textContent = ordinal;
   head.querySelector(".planenv-q-prompt").textContent = entry.prompt;
+  head.querySelector(".planenv-q-how").textContent = entry.multiple ? "choose any" : "choose one";
   card.append(head);
 
   if (entry.detail) {
@@ -133,104 +160,80 @@ const buildCard = (entry) => {
   list.className = "planenv-opts";
   card.append(list);
 
-  const notes = document.createElement("textarea");
-  notes.className = "planenv-notes";
-  notes.rows = 2;
-  notes.placeholder = "note";
-  notes.value = answer.notes;
-  notes.hidden = !answer.notes;
+  const reply = document.createElement("textarea");
+  reply.className = "planenv-reply";
+  reply.rows = 2;
+  reply.placeholder = "write your own answer, or add a note";
+  reply.value = answer.otherText || answer.notes;
+
+  // The declared options the reader has picked. The written answer is not one
+  // of them: it is derived below, because what the text means depends on
+  // whether anything else is chosen.
+  const picked = new Set(answer.selected.filter((value) => value !== OTHER));
+
+  // One field does the job the old widget split across a hidden note button and
+  // a separate written answer row. With nothing picked the text is the answer
+  // itself, and the server takes it as the written option. With something
+  // picked the same text is a note about that choice. The server keeps the two
+  // apart, so the mapping happens here rather than being guessed there.
+  const commit = () => {
+    const text = reply.value;
+    if (picked.size > 0) {
+      answer.selected = [...picked];
+      answer.otherText = "";
+      answer.notes = text;
+    } else if (text.trim()) {
+      answer.selected = [OTHER];
+      answer.otherText = text;
+      answer.notes = "";
+    } else {
+      answer.selected = [];
+      answer.otherText = "";
+      answer.notes = "";
+    }
+  };
 
   const render = () => {
     list.textContent = "";
     for (const option of entry.options) {
-      const row = document.createElement("div");
+      const row = document.createElement("button");
+      row.type = "button";
       row.className = "planenv-opt";
-      if (answer.selected.includes(option.value)) row.classList.add("is-on");
+      if (picked.has(option.value)) row.classList.add("is-on");
 
-      const pick = document.createElement("button");
-      pick.type = "button";
-      pick.className = "planenv-pick";
-      pick.innerHTML = `<i class="planenv-mark${entry.multiple ? " is-box" : ""}"></i>`;
+      const box = document.createElement("i");
+      box.className = `planenv-mark${entry.multiple ? "" : " is-one"}`;
       const label = document.createElement("span");
       label.className = "planenv-label";
       label.textContent = option.label;
-      pick.append(label);
       if (option.detail) {
         const hint = document.createElement("small");
         hint.textContent = option.detail;
-        pick.append(hint);
+        label.append(hint);
       }
-      pick.addEventListener("click", () => {
-        toggle(entry.key, option.value, entry.multiple);
-        render();
-        save(card, entry.key);
-      });
+      row.append(box, label);
 
-      const note = document.createElement("button");
-      note.type = "button";
-      note.className = "planenv-note-btn";
-      note.textContent = "add note";
-      // adding a note is also a way of choosing: it selects the row it sits on
-      note.addEventListener("click", () => {
-        if (!answer.selected.includes(option.value)) {
-          toggle(entry.key, option.value, entry.multiple);
-        }
-        notes.hidden = false;
-        render();
-        notes.focus();
-        save(card, entry.key);
+      row.addEventListener("click", () => {
+        const had = picked.has(option.value);
+        if (!entry.multiple) picked.clear();
+        if (had) picked.delete(option.value);
+        else picked.add(option.value);
+        change();
       });
-
-      row.append(pick, note);
       list.append(row);
     }
-
-    // the ghost row is always offered; the product owns it, not the document
-    const ghost = document.createElement("div");
-    ghost.className = "planenv-opt planenv-ghost";
-    const wroteOther = answer.selected.includes(OTHER);
-    if (wroteOther) ghost.classList.add("is-on");
-
-    const field = document.createElement("textarea");
-    field.className = "planenv-other";
-    field.rows = 2;
-    field.placeholder = "write your own answer";
-    field.value = answer.otherText;
-    field.addEventListener("input", () => {
-      answer.otherText = field.value;
-      if (!answer.selected.includes(OTHER)) toggle(entry.key, OTHER, entry.multiple);
-      save(card, entry.key);
-    });
-
-    if (wroteOther || answer.otherText) {
-      const mark = document.createElement("i");
-      mark.className = `planenv-mark${entry.multiple ? " is-box" : ""}`;
-      ghost.append(mark, field);
-    } else {
-      const open = document.createElement("button");
-      open.type = "button";
-      open.className = "planenv-pick planenv-open";
-      open.innerHTML = `<i class="planenv-mark is-ghost"></i>`;
-      const label = document.createElement("span");
-      label.className = "planenv-label";
-      label.textContent = "write your own answer";
-      open.append(label);
-      open.addEventListener("click", () => {
-        toggle(entry.key, OTHER, entry.multiple);
-        render();
-        card.querySelector(".planenv-other")?.focus();
-      });
-      ghost.append(open);
-    }
-    list.append(ghost);
   };
 
-  render();
-  notes.addEventListener("input", () => {
-    answer.notes = notes.value;
+  const change = () => {
+    commit();
+    render();
+    paint(entry.key);
     save(card, entry.key);
-  });
-  card.append(notes);
+  };
+
+  reply.addEventListener("input", change);
+  render();
+  card.append(reply);
 
   const foot = document.createElement("footer");
   const status = document.createElement("span");
@@ -241,13 +244,9 @@ const buildCard = (entry) => {
   clear.className = "planenv-clear";
   clear.textContent = "clear";
   clear.addEventListener("click", () => {
-    answer.selected = [];
-    answer.otherText = "";
-    answer.notes = "";
-    notes.value = "";
-    notes.hidden = true;
-    render();
-    save(card, entry.key);
+    picked.clear();
+    reply.value = "";
+    change();
   });
   foot.append(status, clear);
   card.append(foot);
@@ -255,21 +254,42 @@ const buildCard = (entry) => {
 };
 
 let panel = null;
-for (const entry of questions) {
-  const card = buildCard(entry);
+questions.forEach((entry, index) => {
+  const ordinal = String(index + 1);
+  const card = buildCard(entry, ordinal);
+  cards.set(entry.key, card);
+
+  // The agent marks the words a question is about with data-planenv-q. Only a
+  // key this revision asks is decorated, so a marker left behind by an earlier
+  // revision reads as ordinary prose rather than pointing at nothing.
+  const marker = document.querySelector(`[data-planenv-q="${CSS.escape(entry.key)}"]`);
+  if (marker) {
+    marker.classList.add("planenv-marked");
+    const number = document.createElement("sup");
+    number.textContent = ordinal;
+    marker.append(number);
+    marker.addEventListener("click", () => reveal(entry.key));
+    markers.set(entry.key, marker);
+  }
+
   const anchor = entry.anchor ? document.getElementById(entry.anchor) : null;
   if (anchor) {
     // insert a sibling; never rewrite, reorder or restyle what the agent wrote
     anchor.after(card);
-    continue;
+  } else {
+    if (!panel) {
+      panel = document.createElement("section");
+      panel.id = "planenv-panel";
+      panel.innerHTML = `<h2>Questions</h2>`;
+      document.body.append(panel);
+    }
+    panel.append(card);
   }
-  if (!panel) {
-    panel = document.createElement("section");
-    panel.id = "planenv-panel";
-    panel.innerHTML = `<h2>Questions</h2>`;
-    document.body.append(panel);
-  }
-  panel.append(card);
+  paint(entry.key);
+});
+
+for (const button of document.querySelectorAll(".planenv-step")) {
+  button.addEventListener("click", () => step(Number(button.dataset.planenvStep)));
 }
 
-updateCounter();
+updateProgress();

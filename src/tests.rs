@@ -1305,6 +1305,55 @@ async fn visitors_get_no_widget_no_key_and_no_questions() {
     assert!(scoped_key(&app, &token, &id, "plan").await.is_some());
 }
 
+/// The widget's styles ride in the page, not behind a second request. A linked
+/// stylesheet can fail on its own, and the widget then renders as bare controls
+/// in the middle of somebody's document.
+#[tokio::test]
+async fn the_owner_gets_the_widget_styles_in_the_page() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    let response = push_with_meta(
+        &app,
+        &token,
+        "plan",
+        "<h1 id=\"P4\">plan</h1>",
+        one_question(),
+    )
+    .await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/{id}/plan/").parse().unwrap())
+        .header(header::HOST, host_of(&format!("/{id}/plan/")))
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .finish();
+    let html = app
+        .get_response(request)
+        .await
+        .into_body()
+        .into_string()
+        .await
+        .unwrap();
+
+    assert!(
+        html.contains(".planenv-q {"),
+        "the widget's own rules must be in the page"
+    );
+    assert!(
+        !html.contains("answer.css"),
+        "nothing may depend on fetching the stylesheet separately"
+    );
+    assert!(
+        html.contains("/_planenv/answer.js"),
+        "the script still loads"
+    );
+}
+
 #[tokio::test]
 async fn a_question_may_not_declare_the_reserved_written_answer() {
     let app = test_app().await;

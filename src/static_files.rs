@@ -36,7 +36,6 @@ pub fn serve_or_index(path: &str) -> Response {
 pub fn answer_asset(Path(name): Path<String>) -> Response {
     let (body, content_type) = match name.as_str() {
         "answer.js" => (include_str!("answer.js"), "text/javascript; charset=utf-8"),
-        "answer.css" => (include_str!("answer.css"), "text/css; charset=utf-8"),
         _ => return Response::builder().status(StatusCode::NOT_FOUND).finish(),
     };
     Response::builder()

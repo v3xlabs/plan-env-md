@@ -1,167 +1,207 @@
-/* In-document answer widget. Every rule is scoped under a planenv- class so it
-   cannot reach the document's own markup, and every value is self-contained so
-   it does not inherit the document's theme by accident. */
+/* In-document answer widget. Every rule is scoped under a planenv- class or a
+   planenv- attribute so it cannot reach the document's own markup, and every
+   value is self-contained so it does not inherit the document's theme by
+   accident.
 
-.planenv-q {
-  --pq-bg: #fbfaf8;
+   The values match the palette in the skill's document.css. The widget cannot
+   read that file's custom properties, because a document is free not to use it,
+   so the numbers are repeated here rather than referenced. A page that does use
+   it gets a widget made of the same surfaces, hairlines and hues as everything
+   around it.
+
+   Two type sizes and nothing else: --pq-fs for anything you read, --pq-fs-s for
+   metadata. No radius, no closed border, no shadow, and a chosen option marked
+   once, by its box and its row tint together. */
+
+.planenv-q,
+.planenv-marked {
+  --pq-bg: #f4f2ee;
   --pq-panel: #ffffff;
+  --pq-sunk: #efece5;
   --pq-ink: #1f2024;
-  --pq-soft: #5a5c63;
-  --pq-faint: #8b8d94;
-  --pq-rule: #ddd9d2;
-  --pq-accent: #196d59;
-  --pq-accent-soft: #196d5914;
-
-  display: block;
-  margin: 1.25rem 0;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--pq-rule);
-  border-left: 3px solid var(--pq-accent);
-  border-radius: 8px;
-  background: var(--pq-panel);
-  color: var(--pq-ink);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-  text-align: left;
-  box-shadow: 0 1px 2px #0000000d;
+  --pq-soft: #55575e;
+  --pq-faint: #83858c;
+  --pq-rule: #dedbd4;
+  --pq-accent: #2f5fd0;
+  --pq-accent-soft: #2f5fd016;
+  --pq-accent-tint: #e9eefa;
+  --pq-warn: #8a5600;
+  --pq-warn-soft: #8a560016;
+  --pq-pos: #1c7340;
+  --pq-pos-soft: #1c734016;
+  --pq-fs: 15px;
+  --pq-fs-s: 11.5px;
+  --pq-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
-  .planenv-q {
-    --pq-bg: #14151a;
-    --pq-panel: #1b1d24;
+  .planenv-q,
+  .planenv-marked {
+    --pq-bg: #131419;
+    --pq-panel: #1c1e26;
+    --pq-sunk: #0f1014;
     --pq-ink: #e6e6e4;
     --pq-soft: #a2a5ad;
     --pq-faint: #71747d;
-    --pq-rule: #34383d;
-    --pq-accent: #4cc2a0;
-    --pq-accent-soft: #4cc2a022;
-    box-shadow: none;
+    --pq-rule: #2c2f38;
+    --pq-accent: #86a8f7;
+    --pq-accent-soft: #86a8f724;
+    --pq-accent-tint: #232a3d;
+    --pq-warn: #e2b25f;
+    --pq-warn-soft: #e2b25f24;
+    --pq-pos: #5fbf87;
+    --pq-pos-soft: #5fbf8724;
   }
+}
+
+/* ---------- the marker in the prose ---------- */
+
+/* The agent writes <span data-planenv-q="KEY">the phrase</span>. The class is
+   added by the script, and only for a key the revision actually asks, so a
+   marker left behind by an earlier revision reads as ordinary prose instead of
+   pointing at a question that is no longer there. */
+.planenv-marked {
+  background: var(--pq-warn-soft);
+  box-shadow: inset 0 -1px 0 var(--pq-warn);
+  cursor: pointer;
+}
+
+.planenv-marked:hover {
+  background: var(--pq-warn);
+  color: #ffffff;
+}
+
+.planenv-marked sup {
+  font-family: var(--pq-mono);
+  font-size: 0.68em;
+  color: var(--pq-warn);
+  padding-left: 0.2em;
+}
+
+.planenv-marked:hover sup { color: inherit; }
+
+.planenv-marked.is-answered {
+  background: var(--pq-pos-soft);
+  box-shadow: inset 0 -1px 0 var(--pq-pos);
+}
+
+.planenv-marked.is-answered sup { color: var(--pq-pos); }
+.planenv-marked.is-answered:hover { background: var(--pq-pos); color: #ffffff; }
+
+/* ---------- the question block ---------- */
+
+.planenv-q {
+  display: block;
+  margin: 1.1rem 0;
+  color: var(--pq-ink);
+  font: var(--pq-fs) / 1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: left;
+  scroll-margin-top: 4rem;
 }
 
 .planenv-q * { box-sizing: border-box; }
 
 .planenv-q > header {
   display: flex;
-  gap: 0.5rem;
   align-items: baseline;
-  margin-bottom: 0.15rem;
+  gap: 0.7rem;
+  margin-bottom: 0.2rem;
 }
 
 .planenv-q-key {
   flex: none;
-  font: 500 10px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--pq-accent);
-  background: var(--pq-accent-soft);
-  border-radius: 3px;
-  padding: 0.1em 0.45em;
+  font: 500 var(--pq-fs-s) / 1.6 var(--pq-mono);
+  color: var(--pq-warn);
 }
 
-.planenv-q-prompt { font-weight: 600; }
+.planenv-q.is-answered .planenv-q-key { color: var(--pq-pos); }
+
+.planenv-q-prompt { flex: 1 1 auto; font-weight: 600; }
+
+.planenv-q-how {
+  flex: none;
+  font: 500 var(--pq-fs-s) / 1.6 var(--pq-mono);
+  color: var(--pq-faint);
+}
 
 .planenv-q-detail {
-  margin: 0.2rem 0 0.7rem;
+  margin: 0 0 0.6rem;
   color: var(--pq-soft);
-  font-size: 13px;
 }
 
-.planenv-opts { display: grid; gap: 1px; }
+/* hairlines from a 1px gap over a background, never a border per child */
+.planenv-opts {
+  display: grid;
+  gap: 1px;
+  background: var(--pq-rule);
+}
 
 .planenv-opt {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  border-radius: 6px;
-  padding: 0.1rem;
-}
-
-.planenv-opt.is-on { background: var(--pq-accent-soft); }
-
-.planenv-pick {
-  flex: 1;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0 0.55rem;
-  align-items: baseline;
-  min-width: 0;
-  padding: 0.4rem 0.5rem;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
   border: 0;
-  border-radius: 6px;
-  background: none;
+  background: var(--pq-panel);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.planenv-pick:hover { background: #8b8d9414; }
-.planenv-pick small { grid-column: 2; color: var(--pq-faint); font-size: 12px; }
+.planenv-opt:hover { background: var(--pq-bg); }
+.planenv-opt.is-on, .planenv-opt.is-on:hover { background: var(--pq-accent-tint); }
+.planenv-opt:focus-visible { outline: 2px solid var(--pq-accent); outline-offset: -2px; }
 
 .planenv-mark {
   flex: none;
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
+  margin-top: 0.28rem;
   border: 1px solid var(--pq-faint);
-  border-radius: 50%;
-  align-self: center;
-  position: relative;
+  background: var(--pq-bg);
 }
-
-.planenv-mark.is-box { border-radius: 3px; }
-.planenv-mark.is-ghost { border-style: dashed; }
 
 .planenv-opt.is-on .planenv-mark {
   border-color: var(--pq-accent);
   background: var(--pq-accent);
-  box-shadow: inset 0 0 0 2.5px var(--pq-panel);
 }
 
-.planenv-ghost .planenv-label { color: var(--pq-faint); font-style: italic; }
-.planenv-ghost.is-on { padding: 0.4rem 0.5rem; gap: 0.55rem; align-items: center; }
-
-.planenv-note-btn {
-  flex: none;
-  align-self: center;
-  border: 0;
-  background: none;
-  border-radius: 4px;
-  padding: 0.25rem 0.4rem;
-  color: var(--pq-faint);
-  font: 500 11px/1 system-ui, sans-serif;
-  cursor: pointer;
-  opacity: 0;
+/* a single answer question fills the box with a ring, so the shape says how
+   many you may pick without reaching for a radius */
+.planenv-opt.is-on .planenv-mark.is-one {
+  box-shadow: inset 0 0 0 3px var(--pq-accent-tint);
 }
 
-.planenv-opt:hover .planenv-note-btn,
-.planenv-note-btn:focus-visible { opacity: 1; }
-.planenv-note-btn:hover { color: var(--pq-accent); background: var(--pq-accent-soft); }
+.planenv-label { min-width: 0; }
+.planenv-label small { display: block; color: var(--pq-faint); }
 
-.planenv-other,
-.planenv-notes {
+/* the written answer is a field you can see, not a button that appears on
+   hover: the note affordance being invisible until hover is why it was never
+   found */
+.planenv-reply {
+  display: block;
   width: 100%;
-  min-width: 0;
+  min-height: 3.4rem;
+  margin-top: 1px;
+  padding: 0.55rem 0.7rem;
+  border: 0;
   resize: vertical;
-  border: 1px solid var(--pq-rule);
-  border-radius: 6px;
-  padding: 0.45rem 0.55rem;
-  background: var(--pq-bg);
+  background: var(--pq-sunk);
   color: var(--pq-ink);
   font: inherit;
-  font-size: 13px;
 }
 
-.planenv-notes { margin-top: 0.5rem; }
-.planenv-other:focus, .planenv-notes:focus { outline: 2px solid var(--pq-accent); outline-offset: -1px; }
+.planenv-reply::placeholder { color: var(--pq-faint); }
+.planenv-reply:focus { outline: 0; box-shadow: inset 2px 0 var(--pq-accent); }
 
 .planenv-q > footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 0.6rem;
-  font: 500 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.04em;
+  margin-top: 0.4rem;
+  font: 500 var(--pq-fs-s) / 1.6 var(--pq-mono);
   color: var(--pq-faint);
 }
 
@@ -169,25 +209,23 @@
   border: 0;
   background: none;
   padding: 0.2rem 0.4rem;
-  border-radius: 4px;
   color: var(--pq-faint);
   font: inherit;
   cursor: pointer;
 }
 
-.planenv-clear:hover { color: var(--pq-ink); background: #8b8d9414; }
+.planenv-clear:hover { color: var(--pq-ink); }
 
-/* the panel holds unanchored questions; it shares the inline cards' edges so
-   the two do not read as different widths */
+/* the panel holds a question whose anchor is missing, so it still gets asked */
 #planenv-panel { margin: 2.5rem 0 0; }
 
 #planenv-panel > h2 {
-  font: 500 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #8b8d94;
+  font: 500 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #83858c;
 }
 
 @media print {
   .planenv-q, #planenv-panel { display: none; }
+  .planenv-marked { background: none; box-shadow: none; }
+  .planenv-marked sup { display: none; }
 }
