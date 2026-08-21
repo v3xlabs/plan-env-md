@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import { TbOutlineSettings } from "solid-icons/tb";
-import { createSignal, For, type JSX, Show, Suspense } from "solid-js";
+import { createSignal, For, Show, Suspense } from "solid-js";
 
 import { documentsQueryOptions } from "../api/documents";
 import {
@@ -15,17 +15,9 @@ import { Button } from "../components/Button";
 import { DocumentRow } from "../components/DocumentRow";
 import { Modal } from "../components/Modal";
 import { ProjectFavicon } from "../components/ProjectFavicon";
+import { SettingsSection } from "../components/SettingsSection";
 
 const SCHEMES = ["light", "dark"] as const;
-
-/// One labelled group in the settings dialog. The dialog holds three unrelated
-/// things, and without a heading each they read as one long column of controls.
-const Section = (properties: { title: string; children: JSX.Element; }) => (
-  <section class="space-y-2">
-    <h3 class="font-mono text-xs tracking-wide text-muted uppercase">{properties.title}</h3>
-    {properties.children}
-  </section>
-);
 
 const FaviconSlot = (properties: {
   project: string;
@@ -238,7 +230,7 @@ const ProjectPage = () => {
 
       <Modal title="Project settings" isOpen={isSettingsOpen()} onOpenChange={setSettingsOpen}>
         <div class="space-y-5">
-          <Section title="Icon">
+          <SettingsSection title="Icon">
             <For each={SCHEMES}>
               {scheme => (
                 <FaviconSlot
@@ -255,15 +247,15 @@ const ProjectPage = () => {
             <p class="text-xs text-muted">
               PNG, SVG, WebP, GIF or ICO, up to 64 KB. Square, and legible at 16 pixels.
             </p>
-          </Section>
+          </SettingsSection>
 
-          <Section title="Also known as">
+          <SettingsSection title="Also known as">
             <Aliases project={parameters().project} aliases={project()?.aliases ?? []} />
-          </Section>
+          </SettingsSection>
 
-          <Section title="Remove this project">
+          <SettingsSection title="Remove this project">
             <RemoveProject project={parameters().project} documents={owned().length} />
-          </Section>
+          </SettingsSection>
         </div>
       </Modal>
 

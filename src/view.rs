@@ -549,7 +549,7 @@ async fn document_page(
             current,
             latest,
             &revisions,
-            questions.len(),
+            &questions,
         )
         .as_bytes(),
     );
@@ -588,7 +588,7 @@ fn overlay_fragment(
     current: i64,
     latest: i64,
     revisions: &[i64],
-    question_count: usize,
+    questions: &[crate::api::question::AnsweredQuestion],
 ) -> String {
     let slug = &doc.slug;
     let title = html_escape(doc.title.as_deref().unwrap_or(slug));
@@ -626,10 +626,14 @@ fn overlay_fragment(
         format!("rev {current} of {latest}")
     };
 
-    let answered = if question_count > 0 {
-        format!(r#"<span id="planenv-answered">0 of {question_count} answered</span>"#)
-    } else {
+    // the count is rendered rather than left at zero for the widget to correct,
+    // so the pill agrees with the document list before any script runs
+    let answered = if questions.is_empty() {
         String::new()
+    } else {
+        let count = questions.iter().filter(|q| q.answer.is_some()).count();
+        let total = questions.len();
+        format!(r#"<span id="planenv-answered">{count} of {total} answered</span>"#)
     };
 
     format!(

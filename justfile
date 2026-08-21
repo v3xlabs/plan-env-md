@@ -33,6 +33,8 @@ fmt:
 
 lint:
     cargo clippy --all-targets -- -D warnings
+    # embedded into the binary and never imported, so nothing else parses it
+    node --check src/answer.js
     cd web && pnpm lint && pnpm typecheck
 
 test:

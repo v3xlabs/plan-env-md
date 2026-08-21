@@ -11,9 +11,6 @@ const SLUG = script.dataset.planenvSlug;
 // the API answers on the app origin, which is not the origin serving this
 // document, so the address is handed over rather than resolved relative to it
 const API = script.dataset.planenvApi;
-// the API lives on the app origin, which is not the origin this document is
-// served from
-const API = script.dataset.planenvApi;
 const OTHER = "other";
 const SAVE_DELAY = 600;
 

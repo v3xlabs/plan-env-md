@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/solid-router";
 import clsx from "clsx";
+import { TbOutlineSettings } from "solid-icons/tb";
 import { createSignal, For, Show, Suspense } from "solid-js";
 
 import {
@@ -16,6 +17,7 @@ import { CopyBlock } from "../components/CopyBlock";
 import { iconForTag } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { ProjectFavicon } from "../components/ProjectFavicon";
+import { SettingsSection } from "../components/SettingsSection";
 import { TextInput } from "../components/TextInput";
 import { Thumbnail } from "../components/Thumbnail";
 
@@ -67,7 +69,10 @@ const DocumentPage = () => {
   };
 
   const [isShareOpen, setShareOpen] = createSignal(false);
-  const [isDeleteOpen, setDeleteOpen] = createSignal(false);
+  const [isSettingsOpen, setSettingsOpen] = createSignal(false);
+  /// Deleting takes a second press rather than a second dialog, since the
+  /// settings dialog is already the step that separates it from the page.
+  const [isConfirmingDelete, setConfirmingDelete] = createSignal(false);
   /// A published document shows its controls first; the password field only
   /// appears once the reader asks to replace the password.
   const [isRotating, setRotating] = createSignal(false);
@@ -113,7 +118,13 @@ const DocumentPage = () => {
 
     if (rerender.isError) return "could not queue";
 
-    return rerender.isSuccess ? "queued, reload shortly" : "re-render preview";
+    return rerender.isSuccess ? "queued" : "re-render";
+  };
+
+  const openSettings = (isOpen: boolean) => {
+    setSettingsOpen(isOpen);
+
+    if (!isOpen) setConfirmingDelete(false);
   };
 
   const remove = useMutation(() => ({
@@ -141,24 +152,11 @@ const DocumentPage = () => {
         {document => (
           <div class="space-y-8">
             <header class="flex flex-wrap items-start gap-5">
-              <div class="shrink-0 space-y-1.5">
-                <Thumbnail
-                  slug={document().slug}
-                  href={document().url}
-                  class="h-40 w-64"
-                />
-                {/* beside the thumbnail, because the thumbnail is the thing it
-                    is about: a preview captured before the page's own assets
-                    existed stays wrong until it is asked for again */}
-                <button
-                  type="button"
-                  disabled={rerender.isPending}
-                  onClick={() => rerender.mutate(document().slug)}
-                  class="font-mono text-xs text-muted hover:text-accent disabled:opacity-50"
-                >
-                  {rerenderLabel()}
-                </button>
-              </div>
+              <Thumbnail
+                slug={document().slug}
+                href={document().url}
+                class="h-40 w-64"
+              />
 
               <div class="min-w-0 flex-1 space-y-2">
                 <Show when={document().project}>
@@ -218,6 +216,14 @@ const DocumentPage = () => {
                 >
                   Open
                 </a>
+                <Button
+                  variant="quiet"
+                  onClick={() => setSettingsOpen(true)}
+                  title="Document settings"
+                  aria-label="Document settings"
+                >
+                  <TbOutlineSettings class="size-4" aria-hidden="true" />
+                </Button>
               </div>
             </header>
 
@@ -261,51 +267,80 @@ const DocumentPage = () => {
               </p>
             </section>
 
-            <section>
-              <h2 class="mb-2 font-mono text-xs tracking-wide text-muted uppercase">
-                Delete this document
-              </h2>
-              <div class="flex items-center gap-3">
-                <Button variant="danger" onClick={() => setDeleteOpen(true)}>
-                  Delete
-                </Button>
-                <p class="min-w-0 flex-1 text-xs text-muted">
-                  Every revision goes with it, including the links people already
-                  hold. This cannot be undone.
-                </p>
-              </div>
-            </section>
-
             <Modal
-              title="Delete this document"
-              isOpen={isDeleteOpen()}
-              onOpenChange={setDeleteOpen}
+              title="Document settings"
+              isOpen={isSettingsOpen()}
+              onOpenChange={openSettings}
             >
-              <div class="space-y-4">
-                <p class="text-sm text-muted">
-                  {document().title ?? document().slug}
-                  {" and its "}
-                  {document().revisions.length}
-                  {document().revisions.length === 1 ? " revision" : " revisions"}
-                  {" are removed. Anyone holding a link gets nothing. This cannot be undone."}
-                </p>
-                <Show when={remove.error}>
-                  {error => (
-                    <p class="text-sm text-red-700 dark:text-red-400">{error().message}</p>
-                  )}
-                </Show>
-                <div class="flex justify-end gap-2">
-                  <Button variant="quiet" onClick={() => setDeleteOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="danger"
-                    disabled={remove.isPending}
-                    onClick={() => remove.mutate(document().slug)}
-                  >
-                    {remove.isPending ? "Deleting" : "Delete"}
-                  </Button>
-                </div>
+              <div class="space-y-5">
+                <SettingsSection title="Preview">
+                  <div class="flex items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={rerender.isPending}
+                      onClick={() => rerender.mutate(document().slug)}
+                      class="shrink-0 rounded border border-line px-2 py-1 font-mono text-xs text-muted hover:border-accent hover:text-accent disabled:opacity-50"
+                    >
+                      {rerenderLabel()}
+                    </button>
+                    <p class="min-w-0 flex-1 text-xs text-muted">
+                      The thumbnail is captured once, when the revision is pushed. One
+                      taken by an older renderer stays wrong until it is asked for
+                      again. Reload the page shortly after.
+                    </p>
+                  </div>
+                </SettingsSection>
+
+                <SettingsSection title="Delete this document">
+                  <div class="flex items-center gap-3">
+                    <Show
+                      when={isConfirmingDelete()}
+                      fallback={(
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingDelete(true)}
+                            class="shrink-0 rounded border border-line px-2 py-1 font-mono text-xs text-muted hover:border-red-600 hover:text-red-600 dark:hover:border-red-400 dark:hover:text-red-400"
+                          >
+                            delete
+                          </button>
+                          <p class="min-w-0 flex-1 text-xs text-muted">
+                            Every revision goes with it, including the links people
+                            already hold. This cannot be undone.
+                          </p>
+                        </>
+                      )}
+                    >
+                      <button
+                        type="button"
+                        disabled={remove.isPending}
+                        onClick={() => remove.mutate(document().slug)}
+                        class="shrink-0 rounded border border-red-600 px-2 py-1 font-mono text-xs text-red-700 disabled:opacity-50 dark:border-red-400 dark:text-red-400"
+                      >
+                        {remove.isPending ? "deleting" : "delete for good"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDelete(false)}
+                        class="shrink-0 rounded border border-line px-2 py-1 font-mono text-xs text-muted hover:border-accent hover:text-accent"
+                      >
+                        cancel
+                      </button>
+                      <p class="min-w-0 flex-1 text-xs text-muted">
+                        {document().revisions.length}
+                        {document().revisions.length === 1 ? " revision" : " revisions"}
+                        {" go. Anyone holding a link gets nothing."}
+                      </p>
+                    </Show>
+                  </div>
+                  <Show when={remove.error}>
+                    {error => (
+                      <p class="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {error().message}
+                      </p>
+                    )}
+                  </Show>
+                </SettingsSection>
               </div>
             </Modal>
 
