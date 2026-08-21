@@ -667,13 +667,22 @@ fn overlay_fragment(
   pointer-events: none;
   font: 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
 }}
-#planenv-tools {{ display: flex; gap: 6px; align-items: stretch; }}
+/* the overlay is injected into somebody else's document, so it cannot borrow
+   that document's reset, and every size below depends on the border being
+   inside the height */
+#planenv-overlay, #planenv-overlay * {{ box-sizing: border-box; }}
+/* flex-start, not stretch: a pill that grew would drag Share up with it and
+   leave the revision summary behind, since that one sits inside a details */
+#planenv-tools {{ display: flex; gap: 6px; align-items: flex-start; }}
 #planenv-overlay a, #planenv-overlay summary, #planenv-progress {{
   pointer-events: auto;
   display: flex; align-items: center;
   background: #1c1f22e8; color: #e7e5df;
   border: 1px solid #ffffff26;
-  padding: 7px 12px; text-decoration: none; cursor: pointer;
+  /* one height for every pill, set here and never by what a pill contains, so
+     nothing in the cluster moves when a control changes state */
+  height: 28px; padding: 0 12px;
+  text-decoration: none; cursor: pointer;
   white-space: nowrap;
 }}
 #planenv-overlay a:focus-visible, #planenv-overlay summary:focus-visible {{
@@ -689,7 +698,7 @@ fn overlay_fragment(
   display: flex; flex-direction: column; min-width: 130px;
   background: #1c1f22f2; border: 1px solid #ffffff26; padding: 4px;
 }}
-#planenv-revs nav a {{ background: none; border: 0; padding: 7px 10px; }}
+#planenv-revs nav a {{ background: none; border: 0; padding: 0 10px; }}
 #planenv-revs nav a:hover {{ background: #ffffff14; }}
 #planenv-revs nav a.viewing {{ color: #4cc2a0; }}
 #planenv-share {{ background: #4cc2a0; border-color: transparent; color: #10201b; font-weight: 600; }}
@@ -697,7 +706,7 @@ fn overlay_fragment(
 /* The answer control. Its padding matches the pills beside it and its track is
    out of flow, so it is exactly their height in every state, including the
    square it collapses to. */
-#planenv-progress {{ position: relative; gap: 10px; padding: 7px 10px; }}
+#planenv-progress {{ position: relative; gap: 10px; padding: 0 10px; }}
 #planenv-answered {{ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }}
 #planenv-nav {{ display: flex; gap: 4px; }}
 .planenv-step {{
@@ -717,6 +726,8 @@ fn overlay_fragment(
 /* Answered in full: the control keeps the height and gives up the width, and
    hover or focus hands every part of it back. Reduced motion lands on the same
    square without the step in between, so the square has to read on its own. */
+/* the square is the pill height on both sides, and only the width animates,
+   so the row it sits in never reflows */
 #planenv-progress.is-done {{
   width: 28px; padding: 0; gap: 0; justify-content: center;
   background: #4cc2a0; border-color: #4cc2a0;
@@ -725,7 +736,7 @@ fn overlay_fragment(
 #planenv-progress.is-done > :not(#planenv-done) {{ display: none; }}
 #planenv-progress.is-done #planenv-done {{ display: block; }}
 #planenv-progress.is-done:hover, #planenv-progress.is-done:focus-within {{
-  width: auto; padding: 7px 10px; gap: 10px;
+  width: auto; padding: 0 10px; gap: 10px;
   background: #1c1f22e8; border-color: #ffffff26;
 }}
 #planenv-progress.is-done:hover > :not(#planenv-done), #planenv-progress.is-done:focus-within > :not(#planenv-done) {{ display: flex; }}
