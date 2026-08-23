@@ -1,6 +1,7 @@
 mod api;
 mod config;
 mod projection;
+mod render;
 
 use api::Api;
 use projection::{View, project};
@@ -38,7 +39,7 @@ struct PushRequest {
     )]
     tags: Option<Vec<String>>,
     #[schemars(
-        description = "Decisions to ask the reader, answered in the document itself. Omitting leaves the existing set alone; an empty list clears it. The reader can always write their own answer or add a note, so do not add an option for that."
+        description = "Decisions to ask the reader, answered in the document itself. Every revision declares its own set, so a push that omits this clears them: repeat them to keep them. An answer outlives the revision that asked it, so re-declaring a key brings its answer back. The reader can always write their own answer or add a note, so do not add an option for that."
     )]
     questions: Option<Vec<Question>>,
 }
@@ -96,10 +97,12 @@ struct PushFile {
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct ProjectDocumentsRequest {
-    #[schemars(description = "Project slug or alias.")]
-    project: String,
-    #[schemars(description = "How many of the most recent documents to return. Defaults to 10.")]
+struct ListRequest {
+    #[schemars(
+        description = "Project slug or alias. Pass the project you are working in unless the user asked across projects."
+    )]
+    project: Option<String>,
+    #[schemars(description = "How many of the most recent documents to return. Defaults to 20.")]
     limit: Option<i64>,
 }
 
@@ -147,18 +150,6 @@ struct ReadRequest {
         description = "html preserves source, text is readable content, outline is token-reduced structure, and a11y reports semantic structure."
     )]
     view: Option<View>,
-}
-
-#[derive(Serialize)]
-struct ReadResult {
-    slug: String,
-    revision: Option<i64>,
-    view: View,
-    content: String,
-    /// Questions the document asks and what the reader decided. A sibling of
-    /// content, not appended to it, so every view stays a pure projection and
-    /// an unanswered question is unambiguously null.
-    questions: Vec<api::AnsweredQuestion>,
 }
 
 struct PlanServer {
@@ -244,9 +235,25 @@ fn read_files(files: Vec<PushFile>) -> Result<Vec<api::FilePart>, ErrorData> {
         .collect()
 }
 
-fn json<T: Serialize>(value: &T) -> Result<String, ErrorData> {
-    serde_json::to_string_pretty(value)
-        .map_err(|_| ErrorData::internal_error("cannot serialize tool result", None))
+/// The html view is the whole source, which is the one response that can run to
+/// hundreds of kilobytes. It goes to a file, and the model reads the part of it
+/// that it wants.
+fn write_source(
+    slug: &str,
+    revision: Option<i64>,
+    html: &str,
+) -> Result<std::path::PathBuf, ErrorData> {
+    let directory = std::env::temp_dir().join("plan-env-md");
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| tool_error(format!("cannot create {}: {error}", directory.display())))?;
+    let name = match revision {
+        Some(revision) => format!("{slug}-rev{revision}.html"),
+        None => format!("{slug}-latest.html"),
+    };
+    let path = directory.join(name);
+    std::fs::write(&path, html)
+        .map_err(|error| tool_error(format!("cannot write {}: {error}", path.display())))?;
+    Ok(path)
 }
 
 #[tool_router(server_handler)]
@@ -278,6 +285,7 @@ impl PlanServer {
             (None, None) => return Err(tool_error("supply html or files".to_string())),
         };
 
+        let asked = request.questions.as_ref().map(Vec::len);
         let mut meta = serde_json::Map::new();
         if let Some(title) = request.title {
             meta.insert("title".to_string(), title.into());
@@ -299,29 +307,15 @@ impl PlanServer {
             .push(&request.slug, meta.into(), files)
             .await
             .map_err(tool_error)?;
-        json(&pushed)
+        Ok(render::push(&pushed, asked))
     }
 
     #[tool(
         description = "List projects with their aliases, document counts and whether an icon is set. Call this before pushing so a document joins an existing project instead of starting a near-duplicate. A project with no icon is worth offering to set one for with plan_set_project_icon."
     )]
     async fn plan_projects(&self) -> Result<String, ErrorData> {
-        json(&self.api.projects().await.map_err(tool_error)?)
-    }
-
-    #[tool(
-        description = "Metadata for a project's most recent documents, newest first. Use this to catch up on a project, then plan_read the ones that matter."
-    )]
-    async fn plan_project_documents(
-        &self,
-        Parameters(request): Parameters<ProjectDocumentsRequest>,
-    ) -> Result<String, ErrorData> {
-        let documents = self
-            .api
-            .list(Some(&request.project), Some(request.limit.unwrap_or(10)))
-            .await
-            .map_err(tool_error)?;
-        json(&documents)
+        let projects = self.api.projects().await.map_err(tool_error)?;
+        Ok(render::projects(&projects, render::now()))
     }
 
     #[tool(
@@ -341,7 +335,7 @@ impl PlanServer {
             .set_favicon(&request.project, &scheme, bytes)
             .await
             .map_err(tool_error)?;
-        json(&serde_json::json!({ "project": request.project, "scheme": scheme }))
+        Ok(format!("{scheme} icon set on {}", request.project))
     }
 
     #[tool(
@@ -355,11 +349,14 @@ impl PlanServer {
             .add_alias(&request.project, &request.alias)
             .await
             .map_err(tool_error)?;
-        json(&serde_json::json!({ "project": request.project, "alias": request.alias }))
+        Ok(format!(
+            "{} now resolves to {}",
+            request.alias, request.project
+        ))
     }
 
     #[tool(
-        description = "Read a plan as exact HTML, readable text, a token-reduced outline, or an accessibility-oriented structural report."
+        description = "Read a plan as readable text, a token-reduced outline, or an accessibility-oriented structural report. The html view writes the exact source to a file and returns its path."
     )]
     async fn plan_read(
         &self,
@@ -371,22 +368,35 @@ impl PlanServer {
         let view = request.view.unwrap_or_default();
         let html = self.api.raw(&slug, revision).await.map_err(tool_error)?;
         let projection = project(&html, view);
-        let questions = self
-            .api
-            .info(&slug)
-            .await
-            .map(|info| info.questions)
-            .unwrap_or_default();
-        json(&ReadResult {
-            slug,
-            revision,
-            view: projection.view,
-            content: projection.content,
-            questions,
-        })
+        let pinned = match revision {
+            Some(revision) => format!("rev {revision}"),
+            None => "latest revision".to_string(),
+        };
+        let mut lines = vec![format!("{slug}  {pinned}  {}", view.name())];
+
+        if let View::Html = view {
+            let path = write_source(&slug, revision, &projection.content)?;
+            lines.push(format!(
+                "{} written to {}",
+                render::size(projection.content.len() as i64),
+                path.display()
+            ));
+            return Ok(lines.join("\n"));
+        }
+
+        let questions = self.api.questions(&slug).await.unwrap_or_default();
+        if !questions.is_empty() {
+            lines.push(format!(
+                "{}, plan_answers for detail",
+                render::question_summary(&questions)
+            ));
+        }
+        lines.push(String::new());
+        lines.push(projection.content);
+        Ok(lines.join("\n"))
     }
 
-    #[tool(description = "Get document metadata and its ordered revision index.")]
+    #[tool(description = "Document metadata, its revision index, and its questions.")]
     async fn plan_info(
         &self,
         Parameters(request): Parameters<DocumentRequest>,
@@ -394,14 +404,44 @@ impl PlanServer {
         let (slug, _) = self
             .resolve_document(&request.document, None)
             .map_err(tool_error)?;
-        json(&self.api.info(&slug).await.map_err(tool_error)?)
+        let document = self.api.info(&slug).await.map_err(tool_error)?;
+        Ok(render::info(&document))
     }
 
     #[tool(
-        description = "List documents owned by the configured plan.env.md account, newest first."
+        description = "What the reader decided about a document's questions. Call this after a push that asked any, and prefer it to plan_read or plan_info, which both carry the whole document as well."
     )]
-    async fn plan_list(&self) -> Result<String, ErrorData> {
-        json(&self.api.list(None, None).await.map_err(tool_error)?)
+    async fn plan_answers(
+        &self,
+        Parameters(request): Parameters<DocumentRequest>,
+    ) -> Result<String, ErrorData> {
+        let (slug, _) = self
+            .resolve_document(&request.document, None)
+            .map_err(tool_error)?;
+        let questions = self.api.questions(&slug).await.map_err(tool_error)?;
+        if questions.is_empty() {
+            return Ok(format!("{slug} asks no questions"));
+        }
+        Ok(format!("{slug}  {}", render::questions(&questions)))
+    }
+
+    #[tool(
+        description = "Documents newest first, one row each. Pass project to catch up on the project you are working in, which is what this is normally for; list across every project only when the user asks for that."
+    )]
+    async fn plan_list(
+        &self,
+        Parameters(request): Parameters<ListRequest>,
+    ) -> Result<String, ErrorData> {
+        let documents = self
+            .api
+            .list(request.project.as_deref(), Some(request.limit.unwrap_or(20)))
+            .await
+            .map_err(tool_error)?;
+        Ok(render::documents(
+            &documents,
+            self.docs_url.as_str(),
+            render::now(),
+        ))
     }
 }
 

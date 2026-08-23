@@ -14,6 +14,17 @@ pub enum View {
     A11y,
 }
 
+impl View {
+    pub fn name(self) -> &'static str {
+        match self {
+            View::Html => "html",
+            View::Text => "text",
+            View::Outline => "outline",
+            View::A11y => "a11y",
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct Projection {
     pub view: View,
@@ -72,18 +83,35 @@ fn outline_view(source: &str) -> String {
                 return None;
             }
             let level = element.value().name().strip_prefix('h')?;
-            let id = element.value().attr("id").unwrap_or("-");
-            Some(format!("H{level} [{id}] {value}"))
+            Some(match element.value().attr("id") {
+                Some(id) => format!("H{level} [{id}] {value}"),
+                None => format!("H{level} {value}"),
+            })
         })
         .collect::<Vec<_>>();
-    let links = html
-        .select(&selector("a[href]"))
-        .filter_map(|element| {
-            let value = text(element);
-            let href = element.value().attr("href")?;
-            (!value.is_empty()).then_some(format!("LINK {value}: {href}"))
-        })
-        .collect::<Vec<_>>();
+
+    // A plan page links mostly to itself: a contents rail and cross references,
+    // which the heading list above already carries. A link that leaves the page
+    // is a fact the headings cannot carry, so those are named and the rest are
+    // counted.
+    let mut in_page = 0;
+    let mut external: Vec<&str> = Vec::new();
+    for element in html.select(&selector("a[href]")) {
+        let Some(href) = element.value().attr("href") else {
+            continue;
+        };
+        if href.starts_with('#') {
+            in_page += 1;
+        } else if !external.contains(&href) {
+            external.push(href);
+        }
+    }
+    let links = std::iter::once(format!(
+        "LINKS {in_page} in-page, {} external",
+        external.len()
+    ))
+    .chain(external.into_iter().map(|href| format!("LINK {href}")))
+    .collect::<Vec<_>>();
     let tables = html.select(&selector("table")).count();
     [
         format!("TITLE {title}"),
@@ -134,4 +162,32 @@ fn a11y_view(source: &str) -> String {
         headings.join(", "),
         images.len()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{View, project};
+
+    const PAGE: &str = r##"<html lang="en"><head><title>Plan</title></head><body><main>
+        <h1 id="top">Title</h1><h2>Unanchored</h2>
+        <nav><a href="#top">Contents</a><a href="#top">Top again</a><a href="#other">Other</a></nav>
+        <p><a href="https://esm.sh/shiki@3">shiki</a> and <a href="https://esm.sh/shiki@3">again</a></p>
+        </main></body></html>"##;
+
+    #[test]
+    fn the_outline_counts_in_page_links_and_names_the_rest() {
+        let outline = project(PAGE, View::Outline).content;
+        assert!(outline.contains("LINKS 3 in-page, 1 external"));
+        assert!(outline.contains("LINK https://esm.sh/shiki@3"));
+        // the contents rail restates the heading list, so its targets are noise
+        assert!(!outline.contains("#top"));
+    }
+
+    #[test]
+    fn a_heading_without_an_id_prints_no_empty_bracket() {
+        let outline = project(PAGE, View::Outline).content;
+        assert!(outline.contains("H1 [top] Title"));
+        assert!(outline.contains("H2 Unanchored"));
+        assert!(!outline.contains("[-]"));
+    }
 }

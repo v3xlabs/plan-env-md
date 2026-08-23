@@ -273,6 +273,20 @@ impl Api {
         self.checked(response).await.map(|_| ())
     }
 
+    pub async fn questions(&self, slug: &str) -> Result<Vec<AnsweredQuestion>, String> {
+        let response = self
+            .client
+            .get(self.endpoint(&format!("api/docs/{slug}/questions"))?)
+            .send()
+            .await
+            .map_err(|_| "cannot reach plan.env.md".to_string())?;
+        self.checked(response)
+            .await?
+            .json()
+            .await
+            .map_err(|_| "plan.env.md returned invalid questions".to_string())
+    }
+
     pub async fn raw(&self, slug: &str, revision: Option<i64>) -> Result<String, String> {
         let path = match revision {
             Some(revision) => format!("api/docs/{slug}/revisions/{revision}/raw"),
