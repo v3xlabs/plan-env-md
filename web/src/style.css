@@ -20,3 +20,30 @@
 body {
     @apply bg-bg font-sans text-ink antialiased;
 }
+
+/* A drawn page, sitting under every preview. The worker renders a preview per
+   revision, so a document is normally read before its picture exists, and a
+   404 stays a 404 while the worker catches up or stays switched off. */
+@utility thumb-skeleton {
+    background-color: var(--color-surface);
+
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 12% 45% auto 10%;
+        height: 8%;
+        background: var(--color-line);
+    }
+
+    &::after {
+        content: '';
+        position: absolute;
+        inset: 30% 18% 14% 10%;
+        background: repeating-linear-gradient(
+            to bottom,
+            var(--color-line) 0 2px,
+            transparent 2px 7px
+        );
+        opacity: 0.7;
+    }
+}

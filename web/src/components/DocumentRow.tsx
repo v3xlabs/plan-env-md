@@ -29,11 +29,9 @@ export const DocumentRow = (properties: Properties) => {
         </For>
       </div>
 
-      <Thumbnail
-        slug={document().slug}
-        href={document().url}
-        class="hidden h-15 w-24 sm:block"
-      />
+      <a href={document().url} class="hidden h-15 w-24 shrink-0 sm:block">
+        <Thumbnail slug={document().slug} class="size-full rounded border border-line" />
+      </a>
 
       <div class="min-w-0 flex-1">
         <Link

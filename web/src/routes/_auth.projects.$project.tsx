@@ -12,12 +12,25 @@ import {
   setFavicon,
 } from "../api/projects";
 import { Button } from "../components/Button";
-import { DocumentRow } from "../components/DocumentRow";
+import { DocumentCollection } from "../components/DocumentCollection";
 import { Modal } from "../components/Modal";
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { SettingsSection } from "../components/SettingsSection";
+import { parseView, type View, ViewToggle } from "../components/ViewToggle";
 
 const SCHEMES = ["light", "dark"] as const;
+
+/// Every document here is in one project, so grouping by project would draw
+/// one heading over the whole page.
+const VIEWS = ["list", "cards", "tiles"] as const;
+
+/// Up to this many documents the page is short enough to read whole, and a
+/// second way to look at it is one more control for nothing.
+const VIEW_CHOICE_THRESHOLD = 5;
+
+type Search = {
+  view?: View;
+};
 
 const FaviconSlot = (properties: {
   project: string;
@@ -188,6 +201,8 @@ const RemoveProject = (properties: { project: string; documents: number; }) => {
 
 const ProjectPage = () => {
   const parameters = Route.useParams();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
   const documents = useQuery(() => documentsQueryOptions);
   const projects = useQuery(() => projectsQueryOptions);
   const [isSettingsOpen, setSettingsOpen] = createSignal(false);
@@ -196,6 +211,11 @@ const ProjectPage = () => {
   const hasIcon = () => Boolean(project()?.has_favicon_light ?? project()?.has_favicon_dark);
   const owned = () =>
     (documents.data ?? []).filter(document => document.project === parameters().project);
+
+  const canChooseView = () => owned().length > VIEW_CHOICE_THRESHOLD;
+  /// Below the threshold there is no control to change it back with, so the
+  /// page returns to the list rather than stranding the reader in a grid.
+  const view = (): View => (canChooseView() ? search().view ?? "list" : "list");
 
   return (
     <div>
@@ -217,6 +237,13 @@ const ProjectPage = () => {
             </Show>
           </p>
         </div>
+        <Show when={canChooseView()}>
+          <ViewToggle
+            value={view()}
+            views={VIEWS}
+            onChange={next => navigate({ search: { view: next } })}
+          />
+        </Show>
         <Button
           variant="quiet"
           onClick={() => setSettingsOpen(true)}
@@ -264,11 +291,7 @@ const ProjectPage = () => {
           when={owned().length > 0}
           fallback={<p class="text-muted">Nothing in this project yet.</p>}
         >
-          <ul class="divide-y divide-line border-y border-line">
-            <For each={owned()}>
-              {document => <DocumentRow document={document} showProject={false} />}
-            </For>
-          </ul>
+          <DocumentCollection documents={owned()} view={view()} showProject={false} />
         </Show>
       </Suspense>
     </div>
@@ -276,5 +299,8 @@ const ProjectPage = () => {
 };
 
 export const Route = createFileRoute("/_auth/projects/$project")({
+  validateSearch: (search: Record<string, unknown>): Search => ({
+    view: parseView(search.view),
+  }),
   component: ProjectPage,
 });

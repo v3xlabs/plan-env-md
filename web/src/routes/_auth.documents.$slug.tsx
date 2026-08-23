@@ -152,11 +152,12 @@ const DocumentPage = () => {
         {document => (
           <div class="space-y-8">
             <header class="flex flex-wrap items-start gap-5">
-              <Thumbnail
-                slug={document().slug}
-                href={document().url}
-                class="h-40 w-64"
-              />
+              <a href={document().url} class="block h-40 w-64 shrink-0">
+                <Thumbnail
+                  slug={document().slug}
+                  class="size-full rounded border border-line"
+                />
+              </a>
 
               <div class="min-w-0 flex-1 space-y-2">
                 <Show when={document().project}>

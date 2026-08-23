@@ -3,18 +3,18 @@ import { createSignal, Show } from "solid-js";
 
 type Properties = {
   slug: string;
-  /// Where the picture leads. It is a picture of the plan, so it leads to the
-  /// plan rather than to the image file it happens to be.
-  href: string;
-  /// Sizing for the link box; the image fills it.
+  /// Sizing and framing for the box; the image fills it.
   class?: string;
 };
 
-/// The rendered thumbnail, or nothing. A 404 means the worker has not reached
-/// this revision yet, or is switched off entirely, so a failed load is an
-/// expected state rather than an error worth showing.
+/// The rendered preview, over a drawn page that stands in for one. The worker
+/// renders a preview per revision, so a document is usually looked at before
+/// its picture exists, and a 404 means the worker has not reached this
+/// revision yet or is switched off entirely. The drawn page covers both, and
+/// covers the wait on a slow connection.
 export const Thumbnail = (properties: Properties) => {
   const [isMissing, setMissing] = createSignal(false);
+  const [isLoaded, setLoaded] = createSignal(false);
   const preview = (scheme?: "dark") => {
     const path = `/api/docs/${encodeURIComponent(properties.slug)}/preview`;
 
@@ -22,8 +22,8 @@ export const Thumbnail = (properties: Properties) => {
   };
 
   return (
-    <Show when={!isMissing()}>
-      <a href={properties.href} class={clsx("block shrink-0", properties.class)}>
+    <div class={clsx("thumb-skeleton relative shrink-0 overflow-hidden", properties.class)}>
+      <Show when={!isMissing()}>
         {/* Both schemes are rendered per revision, so a reader in dark mode
             sees the document as they would open it. */}
         <picture class="contents">
@@ -32,11 +32,16 @@ export const Thumbnail = (properties: Properties) => {
             src={preview()}
             alt=""
             loading="lazy"
-            class="size-full rounded border border-line bg-surface object-cover object-top"
+            onLoad={() => setLoaded(true)}
             onError={() => setMissing(true)}
+            class={clsx(
+              "relative size-full bg-surface object-cover object-top",
+              "transition-opacity duration-200",
+              isLoaded() ? "opacity-100" : "opacity-0",
+            )}
           />
         </picture>
-      </a>
-    </Show>
+      </Show>
+    </div>
   );
 };
