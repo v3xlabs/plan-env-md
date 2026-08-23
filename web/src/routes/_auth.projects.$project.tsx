@@ -20,10 +20,6 @@ import { parseView, type View, ViewToggle } from "../components/ViewToggle";
 
 const SCHEMES = ["light", "dark"] as const;
 
-/// Every document here is in one project, so grouping by project would draw
-/// one heading over the whole page.
-const VIEWS = ["list", "cards", "tiles"] as const;
-
 /// Up to this many documents the page is short enough to read whole, and a
 /// second way to look at it is one more control for nothing.
 const VIEW_CHOICE_THRESHOLD = 5;
@@ -240,7 +236,6 @@ const ProjectPage = () => {
         <Show when={canChooseView()}>
           <ViewToggle
             value={view()}
-            views={VIEWS}
             onChange={next => navigate({ search: { view: next } })}
           />
         </Show>

@@ -12,8 +12,7 @@ type Properties = {
   showProject?: boolean;
 };
 
-/// One run of documents, laid out the way the page was asked for. `projects`
-/// changes the headings rather than the run, so it falls through to cards.
+/// One run of documents, laid out the way the page was asked for.
 export const DocumentCollection = (properties: Properties) => (
   <Switch
     fallback={(

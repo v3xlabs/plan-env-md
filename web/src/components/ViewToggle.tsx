@@ -1,25 +1,17 @@
 import clsx from "clsx";
 import type { IconTypes } from "solid-icons";
-import {
-  TbOutlineFolders,
-  TbOutlineLayoutColumns,
-  TbOutlineLayoutGrid,
-  TbOutlineList,
-} from "solid-icons/tb";
+import { TbOutlineLayoutColumns, TbOutlineLayoutGrid, TbOutlineList } from "solid-icons/tb";
 import { For } from "solid-js";
 
-/// How a page lays its documents out. `projects` also changes what the
-/// headings group by, so it is offered only where more than one project can
-/// turn up.
-const VIEWS = ["list", "cards", "tiles", "projects"] as const;
+/// How a page lays its documents out.
+const VIEWS = ["list", "tiles", "cards"] as const;
 
 export type View = typeof VIEWS[number];
 
 const APPEARANCE: Record<View, { icon: IconTypes; label: string; }> = {
   list: { icon: TbOutlineList, label: "List" },
-  cards: { icon: TbOutlineLayoutGrid, label: "Cards" },
   tiles: { icon: TbOutlineLayoutColumns, label: "Two columns" },
-  projects: { icon: TbOutlineFolders, label: "By project" },
+  cards: { icon: TbOutlineLayoutGrid, label: "Cards" },
 };
 
 export const parseView = (value: unknown): View | undefined =>
@@ -27,14 +19,12 @@ export const parseView = (value: unknown): View | undefined =>
 
 type Properties = {
   value: View;
-  /// Which views this page offers, in the order they are shown.
-  views: readonly View[];
   onChange: (view: View) => void;
 };
 
 export const ViewToggle = (properties: Properties) => (
   <div class="flex shrink-0 divide-x divide-line overflow-hidden rounded-md border border-line">
-    <For each={properties.views}>
+    <For each={VIEWS}>
       {(view) => {
         const { icon: ViewIcon, label } = APPEARANCE[view];
 

@@ -35,7 +35,7 @@ export const Thumbnail = (properties: Properties) => {
             onLoad={() => setLoaded(true)}
             onError={() => setMissing(true)}
             class={clsx(
-              "relative size-full bg-surface object-cover object-top",
+              "relative z-10 size-full bg-surface object-cover object-top",
               "transition-opacity duration-200",
               isLoaded() ? "opacity-100" : "opacity-0",
             )}
