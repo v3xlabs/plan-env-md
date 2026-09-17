@@ -512,10 +512,9 @@ async fn document_page(
     };
 
     // the project's icon, so a reader's browser tab says which project this
-    // the project's icon, so a reader's browser tab says which project this
     // document belongs to.
     //
-    // Into <head>, unlike everything else here. Appending after </html> puts
+    // Into <head>, like the chrome contract below. Appending after </html> puts
     // the link in <body> once the parser reparents it, and a favicon link in
     // the body is not reliably honoured: that is why documents carried these
     // links yet showed a blank tab. A document that declared its own icon
@@ -539,12 +538,13 @@ async fn document_page(
         String::new()
     };
 
-    body.extend_from_slice(
-        overlay_fragment(
-            app_url, docs_url, &share, public_id, doc, current, latest, &revisions, &questions,
-        )
-        .as_bytes(),
+    let chrome = chrome_fragments(
+        app_url, docs_url, &share, public_id, doc, current, latest, &revisions, &questions,
     );
+    // first in head, so a document's own stylesheet still outranks the rules
+    // that read the measurements
+    insert_into_head(&mut body, chrome.head.as_bytes());
+    body.extend_from_slice(chrome.overlay.as_bytes());
     if !questions.is_empty() {
         body.extend_from_slice(answer_widget_fragment(app_url, secret, doc, &questions).as_bytes());
     }
@@ -567,11 +567,77 @@ async fn document_page(
         .body(body)
 }
 
-/// A compact pill cluster fixed to the top-right corner. Dark on every
-/// document so it needs no theme detection, hidden in print, no JavaScript:
-/// the revision menu is a details element.
+/// One render of the viewer chrome: the pill cluster that goes at the end of
+/// the body, and the measurements that go into the document's head.
+struct Chrome {
+    head: String,
+    overlay: String,
+}
+
+/// Pill geometry, in CSS pixels. The stylesheet below is written from these
+/// numbers and so is the contract in the document's head, so the two cannot
+/// drift.
+const PILL_H: u32 = 26;
+const PILL_PAD: u32 = 10;
+const CHROME_EDGE: u32 = 6;
+const CHROME_GAP: u32 = 6;
+/// The band a document works around: one pill, plus the padding above and
+/// below it.
+const CHROME_H: u32 = CHROME_EDGE * 2 + PILL_H;
+/// Inside the answer pill: the stepper buttons, the gap between them, and the
+/// gap between the stepper and the count.
+const STEP: u32 = 16;
+const STEP_GAP: u32 = 4;
+const PROGRESS_GAP: u32 = 10;
+/// One character of 12px pill text: the 0.6em advance every monospace font in
+/// the stack uses, rounded up, which also covers the sans `Share` label. The
+/// chrome cannot measure text and a document needs the width before it paints,
+/// so a width here is arithmetic, and it has to come out at or above what the
+/// browser lays out: a reserved box a pixel too wide costs a document nothing,
+/// and one a pixel too narrow puts the document's own header under a pill.
+const CHAR_W: f32 = 7.3;
+
+/// The width of a pill holding `label`: the text, the padding on both sides,
+/// and the two 1px borders inside the box.
+fn pill_w(label: &str) -> u32 {
+    (label.chars().count() as f32 * CHAR_W).ceil() as u32 + PILL_PAD * 2 + 2
+}
+
+/// What the chrome publishes about itself, first in the document's head: the
+/// height of the band it covers, the width of each cluster, and the sizing for
+/// a slot a document puts where the cluster overlaps its own header.
+///
+/// Both widths run from the viewport edge to the far side of the cluster, so a
+/// slot is the chrome's footprint only when it sits flush against that edge: a
+/// header that pads itself pushes the slot inward by the padding, and the pills
+/// do not move with it. A header pads its own text instead.
+///
+/// A document reads these and never writes them. The rules that read them sit
+/// here rather than in the document, and first in head, so a document's own
+/// stylesheet still outranks them.
+fn chrome_contract(brand_w: u32, tools_w: u32) -> String {
+    format!(
+        r#"<style>
+:root {{ --planenv-chrome-h: {CHROME_H}px; --planenv-brand-w: {brand_w}px; --planenv-tools-w: {tools_w}px; }}
+html {{ scroll-padding-top: calc(var(--planenv-chrome-h) + 0.5rem); }}
+[data-planenv-slot] {{ display: inline-block; height: var(--planenv-chrome-h); vertical-align: top; }}
+[data-planenv-slot="tools"] {{ width: var(--planenv-tools-w); }}
+[data-planenv-slot="brand"] {{ width: var(--planenv-brand-w); }}
+@media print {{ [data-planenv-slot] {{ display: none; }} }}
+</style>
+"#
+    )
+}
+
+/// A compact pill cluster fixed to the top of the viewport: the host on the
+/// left, the tools on the right. Hidden in print, no JavaScript, and the
+/// revision menu is a details element.
+///
+/// Every colour is one of four variables a document may declare, falling back
+/// to the viewer's own value for the reader's scheme. Nothing here inspects
+/// what a document sends: contrast inside a document belongs to that document.
 #[allow(clippy::too_many_arguments)]
-fn overlay_fragment(
+fn chrome_fragments(
     app_url: &AppUrl,
     docs_url: &DocsUrl,
     share: &str,
@@ -581,9 +647,8 @@ fn overlay_fragment(
     latest: i64,
     revisions: &[i64],
     questions: &[crate::api::question::AnsweredQuestion],
-) -> String {
+) -> Chrome {
     let slug = &doc.slug;
-    let title = html_escape(doc.title.as_deref().unwrap_or(slug));
 
     // the name says which host the reader is on, and the link goes where they
     // would want to go from a document, which is the app
@@ -593,6 +658,7 @@ fn overlay_fragment(
         Some((first, rest)) => format!("{}<b>.{}</b>", html_escape(first), html_escape(rest)),
         None => html_escape(host),
     };
+    let title = html_escape(doc.title.as_deref().unwrap_or(slug));
 
     let revision_links: String = revisions
         .iter()
@@ -621,11 +687,12 @@ fn overlay_fragment(
     // the count and the segments are rendered rather than left for the widget to
     // fill in, so the control agrees with the document list before any script
     // runs, and so it is not a blank pill while the module loads
+    let count = questions.iter().filter(|q| q.answer.is_some()).count();
+    let total = questions.len();
+    let progress_label = format!("{count} of {total}");
     let answered = if questions.is_empty() {
         String::new()
     } else {
-        let count = questions.iter().filter(|q| q.answer.is_some()).count();
-        let total = questions.len();
         let segments: String = questions
             .iter()
             .map(|q| {
@@ -644,11 +711,32 @@ fn overlay_fragment(
             ""
         };
         format!(
-            r#"<div id="planenv-progress"{done} title="{count} of {total} answered"><span id="planenv-answered">{count} of {total}</span><span id="planenv-nav"><button type="button" class="planenv-step" data-planenv-step="-1" aria-label="Previous question">&#8592;</button><button type="button" class="planenv-step" data-planenv-step="1" aria-label="Next question">&#8594;</button></span><b id="planenv-done">?</b><span id="planenv-track">{segments}</span></div>"#
+            r#"<div id="planenv-progress"{done} title="{count} of {total} answered"><span id="planenv-answered">{progress_label}</span><span id="planenv-nav"><button type="button" class="planenv-step" data-planenv-step="-1" aria-label="Previous question">&#8592;</button><button type="button" class="planenv-step" data-planenv-step="1" aria-label="Next question">&#8594;</button></span><b id="planenv-done">?</b><span id="planenv-track">{segments}</span></div>"#
         )
     };
 
-    format!(
+    // one width per pill that actually rendered: a visitor has no Share pill
+    // and a document with no questions has no answer pill, so a constant would
+    // be wrong in three of the four cases. Both widths start at the viewport
+    // edge, which is where the document's own header starts too.
+    let brand_w = CHROME_EDGE + pill_w(host);
+    let progress_w = if questions.is_empty() {
+        0
+    } else {
+        // the answered pill collapses to a square and hands the width back on
+        // hover, so the reservation is the width it takes when open
+        pill_w(&progress_label) + PROGRESS_GAP + STEP * 2 + STEP_GAP
+    };
+    let share_w = if share.is_empty() { 0 } else { pill_w("Share") };
+    let revs_w = pill_w(&summary);
+    let pills = [progress_w, revs_w, share_w]
+        .iter()
+        .filter(|width| **width > 0)
+        .count() as u32;
+    let tools_w =
+        CHROME_EDGE + progress_w + revs_w + share_w + CHROME_GAP * pills.saturating_sub(1);
+
+    let overlay = format!(
         r#"
 <div id="planenv-overlay">
 <a id="planenv-brand" href="{app_href}" title="{title}">{brand}</a>
@@ -660,12 +748,26 @@ fn overlay_fragment(
 </div>
 <style>
 #planenv-overlay {{
+  /* The viewer's own colours, and a document's if it declares them. The fill
+     is nearly opaque, so a pill stays legible over any content. */
+  --pe-bg: var(--planenv-chrome-bg, #1c1f22e8);
+  --pe-ink: var(--planenv-chrome-ink, #e7e5df);
+  --pe-line: var(--planenv-chrome-line, #ffffff26);
+  --pe-accent: var(--planenv-chrome-accent, #4cc2a0);
   position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;
   display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 10px; padding: 10px;
+  gap: {CHROME_GAP}px; padding: {CHROME_EDGE}px;
   /* the span between the two ends belongs to the document, not to us */
   pointer-events: none;
   font: 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+}}
+@media (prefers-color-scheme: light) {{
+  #planenv-overlay {{
+    --pe-bg: var(--planenv-chrome-bg, #faf9f6e8);
+    --pe-ink: var(--planenv-chrome-ink, #20242a);
+    --pe-line: var(--planenv-chrome-line, #d9d5cb);
+    --pe-accent: var(--planenv-chrome-accent, #196d59);
+  }}
 }}
 /* the overlay is injected into somebody else's document, so it cannot borrow
    that document's reset, and every size below depends on the border being
@@ -673,55 +775,58 @@ fn overlay_fragment(
 #planenv-overlay, #planenv-overlay * {{ box-sizing: border-box; }}
 /* flex-start, not stretch: a pill that grew would drag Share up with it and
    leave the revision summary behind, since that one sits inside a details */
-#planenv-tools {{ display: flex; gap: 6px; align-items: flex-start; }}
+#planenv-tools {{ display: flex; gap: {CHROME_GAP}px; align-items: flex-start; }}
 #planenv-overlay a, #planenv-overlay summary, #planenv-progress {{
   pointer-events: auto;
   display: flex; align-items: center;
-  background: #1c1f22e8; color: #e7e5df;
-  border: 1px solid #ffffff26;
+  background: var(--pe-bg); color: var(--pe-ink);
+  border: 1px solid var(--pe-line);
   /* one height for every pill, set here and never by what a pill contains, so
      nothing in the cluster moves when a control changes state */
-  height: 28px; padding: 0 12px;
+  height: {PILL_H}px; padding: 0 {PILL_PAD}px;
   text-decoration: none; cursor: pointer;
   white-space: nowrap;
 }}
 #planenv-overlay a:focus-visible, #planenv-overlay summary:focus-visible {{
-  outline: 2px solid #4cc2a0; outline-offset: 1px;
+  outline: 2px solid var(--pe-accent); outline-offset: 1px;
 }}
 #planenv-brand {{ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 600; }}
-#planenv-brand b {{ color: #4cc2a0; }}
+#planenv-brand b {{ color: var(--pe-accent); }}
 #planenv-revs {{ position: relative; }}
 #planenv-revs summary {{ list-style: none; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }}
 #planenv-revs summary::-webkit-details-marker {{ display: none; }}
 #planenv-revs nav {{
-  position: absolute; right: 0; top: calc(100% + 6px);
+  position: absolute; right: 0; top: calc(100% + {CHROME_GAP}px);
   display: flex; flex-direction: column; min-width: 130px;
-  background: #1c1f22f2; border: 1px solid #ffffff26; padding: 4px;
+  background: var(--pe-bg); border: 1px solid var(--pe-line); padding: 4px;
 }}
-#planenv-revs nav a {{ background: none; border: 0; padding: 0 10px; }}
-#planenv-revs nav a:hover {{ background: #ffffff14; }}
-#planenv-revs nav a.viewing {{ color: #4cc2a0; }}
-#planenv-share {{ background: #4cc2a0; border-color: transparent; color: #10201b; font-weight: 600; }}
+#planenv-revs nav a {{ background: none; border: 0; padding: 0 {PILL_PAD}px; }}
+#planenv-revs nav a:hover {{ background: color-mix(in srgb, var(--pe-accent) 18%, transparent); }}
+#planenv-revs nav a.viewing {{ color: var(--pe-accent); }}
+/* the overlay id is carried so this outranks the rule above, which names an
+   element as well as an id. The pill fill is the ink on an accent fill: the two
+   tokens sit at opposite ends of the contrast in either scheme */
+#planenv-overlay #planenv-share {{ background: var(--pe-accent); border-color: transparent; color: var(--pe-bg); font-weight: 600; }}
 
 /* The answer control. Its padding matches the pills beside it and its track is
    out of flow, so it is exactly their height in every state, including the
    square it collapses to. */
-#planenv-progress {{ position: relative; gap: 10px; padding: 0 10px; }}
+#planenv-progress {{ position: relative; gap: {PROGRESS_GAP}px; padding: 0 {PILL_PAD}px; }}
 #planenv-answered {{ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }}
-#planenv-nav {{ display: flex; gap: 4px; }}
+#planenv-nav {{ display: flex; gap: {STEP_GAP}px; }}
 .planenv-step {{
-  width: 16px; height: 16px; display: grid; place-items: center;
-  border: 1px solid #ffffff2e; background: none; color: inherit;
+  width: {STEP}px; height: {STEP}px; display: grid; place-items: center;
+  border: 1px solid var(--pe-line); background: none; color: inherit;
   font: 10px/1 system-ui, sans-serif; cursor: pointer; padding: 0;
 }}
-.planenv-step:hover, .planenv-step:focus-visible {{ background: #4cc2a0; border-color: #4cc2a0; color: #10201b; outline: 0; }}
+.planenv-step:hover, .planenv-step:focus-visible {{ background: var(--pe-accent); border-color: var(--pe-accent); color: var(--pe-bg); outline: 0; }}
 .planenv-step[disabled] {{ opacity: .3; cursor: default; }}
-.planenv-step[disabled]:hover {{ background: none; border-color: #ffffff2e; color: inherit; }}
+.planenv-step[disabled]:hover {{ background: none; border-color: var(--pe-line); color: inherit; }}
 /* flush to the bottom, edge to edge, resting on the border rather than being it */
 #planenv-track {{ position: absolute; left: 0; right: 0; bottom: 0; height: 2px; display: flex; gap: 1px; }}
-#planenv-track i {{ flex: 1; background: #ffffff26; }}
-#planenv-track i.is-on {{ background: #4cc2a0; }}
-#planenv-done {{ display: none; color: #ffffff; font-size: 14px; line-height: 1; }}
+#planenv-track i {{ flex: 1; background: var(--pe-line); }}
+#planenv-track i.is-on {{ background: var(--pe-accent); }}
+#planenv-done {{ display: none; color: var(--pe-bg); font-size: 14px; line-height: 1; }}
 
 /* Answered in full: the control keeps the height and gives up the width, and
    hover or focus hands every part of it back. Reduced motion lands on the same
@@ -729,15 +834,15 @@ fn overlay_fragment(
 /* the square is the pill height on both sides, and only the width animates,
    so the row it sits in never reflows */
 #planenv-progress.is-done {{
-  width: 28px; padding: 0; gap: 0; justify-content: center;
-  background: #4cc2a0; border-color: #4cc2a0;
+  width: {PILL_H}px; padding: 0; gap: 0; justify-content: center;
+  background: var(--pe-accent); border-color: var(--pe-accent);
   transition: width 160ms, background-color 160ms;
 }}
 #planenv-progress.is-done > :not(#planenv-done) {{ display: none; }}
 #planenv-progress.is-done #planenv-done {{ display: block; }}
 #planenv-progress.is-done:hover, #planenv-progress.is-done:focus-within {{
-  width: auto; padding: 0 10px; gap: 10px;
-  background: #1c1f22e8; border-color: #ffffff26;
+  width: auto; padding: 0 {PILL_PAD}px; gap: {PROGRESS_GAP}px;
+  background: var(--pe-bg); border-color: var(--pe-line);
 }}
 #planenv-progress.is-done:hover > :not(#planenv-done), #planenv-progress.is-done:focus-within > :not(#planenv-done) {{ display: flex; }}
 #planenv-progress.is-done:hover #planenv-answered, #planenv-progress.is-done:focus-within #planenv-answered {{ display: block; }}
@@ -748,7 +853,12 @@ fn overlay_fragment(
 @media print {{ #planenv-overlay {{ display: none; }} }}
 </style>
 "#
-    )
+    );
+
+    Chrome {
+        head: chrome_contract(brand_w, tools_w),
+        overlay,
+    }
 }
 
 /// The project's icon links for a document, or nothing when it has no project

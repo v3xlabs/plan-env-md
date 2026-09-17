@@ -3,32 +3,45 @@
    value is self-contained so it does not inherit the document's theme by
    accident.
 
-   The values match the palette in the skill's document.css. The widget cannot
-   read that file's custom properties, because a document is free not to use it,
-   so the numbers are repeated here rather than referenced. A page that does use
-   it gets a widget made of the same surfaces, hairlines and hues as everything
-   around it.
+   Six names carry a document's palette across: --planenv-q-bg, -ink, -line,
+   -accent, -open and -on. Every colour below is one of those or is mixed from
+   them, so a document sets six values and the card matches it. What a document
+   declares is used as it arrives: contrast inside a document belongs to that
+   document, and a widget that second-guesses it has opinions about design it
+   should not have.
+
+   The defaults are the viewer's own, the same values as the share page and the
+   dashboard, and they stand alone: a document that declares nothing still gets
+   a legible card in either scheme.
 
    Two type sizes and nothing else: --pq-fs for anything you read, --pq-fs-s for
    metadata. No radius, no closed border, no shadow, and a chosen option marked
    once, by its box and its row tint together. */
 
 .planenv-q,
-.planenv-marked {
-  --pq-bg: #f4f2ee;
-  --pq-panel: #ffffff;
-  --pq-sunk: #efece5;
-  --pq-ink: #1f2024;
-  --pq-soft: #55575e;
-  --pq-faint: #83858c;
-  --pq-rule: #dedbd4;
-  --pq-accent: #2f5fd0;
-  --pq-accent-soft: #2f5fd016;
-  --pq-accent-tint: #e9eefa;
-  --pq-warn: #8a5600;
-  --pq-warn-soft: #8a560016;
-  --pq-pos: #1c7340;
-  --pq-pos-soft: #1c734016;
+.planenv-marked,
+#planenv-panel {
+  --pq-bg: var(--planenv-q-bg, #faf9f6);
+  --pq-ink: var(--planenv-q-ink, #20242a);
+  --pq-rule: var(--planenv-q-line, #d9d5cb);
+  --pq-accent: var(--planenv-q-accent, #20242a);
+  --pq-open: var(--planenv-q-open, #7a4e12);
+  --pq-on: var(--planenv-q-on, #196d59);
+
+  /* the shades: one surface and one ink, so a document that hands over two
+     colours gets the whole card rather than two of its parts */
+  --pq-hover: color-mix(in srgb, var(--pq-bg) 96%, var(--pq-ink));
+  --pq-sunk: color-mix(in srgb, var(--pq-bg) 92%, var(--pq-ink));
+  --pq-soft: color-mix(in srgb, var(--pq-ink) 70%, var(--pq-bg));
+  --pq-faint: color-mix(in srgb, var(--pq-ink) 46%, var(--pq-bg));
+  --pq-accent-tint: color-mix(in srgb, var(--pq-accent) 12%, var(--pq-bg));
+  /* the marker sits in the document's prose, not on the card, so its tint
+     mixes with whatever is behind it rather than with the card surface */
+  --pq-open-wash: color-mix(in srgb, var(--pq-open) 16%, transparent);
+  --pq-open-wash-hover: color-mix(in srgb, var(--pq-open) 30%, transparent);
+  --pq-on-wash: color-mix(in srgb, var(--pq-on) 16%, transparent);
+  --pq-on-wash-hover: color-mix(in srgb, var(--pq-on) 30%, transparent);
+
   --pq-fs: 15px;
   --pq-fs-s: 11.5px;
   --pq-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -36,21 +49,14 @@
 
 @media (prefers-color-scheme: dark) {
   .planenv-q,
-  .planenv-marked {
-    --pq-bg: #131419;
-    --pq-panel: #1c1e26;
-    --pq-sunk: #0f1014;
-    --pq-ink: #e6e6e4;
-    --pq-soft: #a2a5ad;
-    --pq-faint: #71747d;
-    --pq-rule: #2c2f38;
-    --pq-accent: #86a8f7;
-    --pq-accent-soft: #86a8f724;
-    --pq-accent-tint: #232a3d;
-    --pq-warn: #e2b25f;
-    --pq-warn-soft: #e2b25f24;
-    --pq-pos: #5fbf87;
-    --pq-pos-soft: #5fbf8724;
+  .planenv-marked,
+  #planenv-panel {
+    --pq-bg: var(--planenv-q-bg, #1e2125);
+    --pq-ink: var(--planenv-q-ink, #d7d9d3);
+    --pq-rule: var(--planenv-q-line, #34383d);
+    --pq-accent: var(--planenv-q-accent, #d7d9d3);
+    --pq-open: var(--planenv-q-open, #d9a84a);
+    --pq-on: var(--planenv-q-on, #4cc2a0);
   }
 }
 
@@ -61,32 +67,29 @@
    marker left behind by an earlier revision reads as ordinary prose instead of
    pointing at a question that is no longer there. */
 .planenv-marked {
-  background: var(--pq-warn-soft);
-  box-shadow: inset 0 -1px 0 var(--pq-warn);
+  background: var(--pq-open-wash);
+  box-shadow: inset 0 -1px 0 var(--pq-open);
   cursor: pointer;
 }
 
-.planenv-marked:hover {
-  background: var(--pq-warn);
-  color: #ffffff;
-}
+/* hover deepens the wash and keeps the document's own text colour: white ink
+   on an arbitrary hue is a contrast guess, and the tint says enough */
+.planenv-marked:hover { background: var(--pq-open-wash-hover); }
 
 .planenv-marked sup {
   font-family: var(--pq-mono);
   font-size: 0.68em;
-  color: var(--pq-warn);
+  color: var(--pq-open);
   padding-left: 0.2em;
 }
 
-.planenv-marked:hover sup { color: inherit; }
-
 .planenv-marked.is-answered {
-  background: var(--pq-pos-soft);
-  box-shadow: inset 0 -1px 0 var(--pq-pos);
+  background: var(--pq-on-wash);
+  box-shadow: inset 0 -1px 0 var(--pq-on);
 }
 
-.planenv-marked.is-answered sup { color: var(--pq-pos); }
-.planenv-marked.is-answered:hover { background: var(--pq-pos); color: #ffffff; }
+.planenv-marked.is-answered sup { color: var(--pq-on); }
+.planenv-marked.is-answered:hover { background: var(--pq-on-wash-hover); }
 
 /* ---------- the question block ---------- */
 
@@ -96,7 +99,7 @@
   color: var(--pq-ink);
   font: var(--pq-fs) / 1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
   text-align: left;
-  scroll-margin-top: 4rem;
+  scroll-margin-top: calc(var(--planenv-chrome-h) + 1rem);
 }
 
 .planenv-q * { box-sizing: border-box; }
@@ -111,10 +114,10 @@
 .planenv-q-key {
   flex: none;
   font: 500 var(--pq-fs-s) / 1.6 var(--pq-mono);
-  color: var(--pq-warn);
+  color: var(--pq-open);
 }
 
-.planenv-q.is-answered .planenv-q-key { color: var(--pq-pos); }
+.planenv-q.is-answered .planenv-q-key { color: var(--pq-on); }
 
 .planenv-q-prompt { flex: 1 1 auto; font-weight: 600; }
 
@@ -143,14 +146,14 @@
   width: 100%;
   padding: 0.5rem 0.7rem;
   border: 0;
-  background: var(--pq-panel);
+  background: var(--pq-bg);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.planenv-opt:hover { background: var(--pq-bg); }
+.planenv-opt:hover { background: var(--pq-hover); }
 .planenv-opt.is-on, .planenv-opt.is-on:hover { background: var(--pq-accent-tint); }
 .planenv-opt:focus-visible { outline: 2px solid var(--pq-accent); outline-offset: -2px; }
 
@@ -160,7 +163,7 @@
   height: 14px;
   margin-top: 0.28rem;
   border: 1px solid var(--pq-faint);
-  background: var(--pq-bg);
+  background: var(--pq-sunk);
 }
 
 .planenv-opt.is-on .planenv-mark {
@@ -220,8 +223,8 @@
 #planenv-panel { margin: 2.5rem 0 0; }
 
 #planenv-panel > h2 {
-  font: 500 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #83858c;
+  font: 500 var(--pq-fs-s) / 1.6 var(--pq-mono);
+  color: var(--pq-faint);
 }
 
 @media print {

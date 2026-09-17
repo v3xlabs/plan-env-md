@@ -715,7 +715,9 @@ async fn public_view_password_gate_lifecycle() {
     let response = call(&app, Method::GET, &doc_path, None, with_cookie(&reader)).await;
     assert_eq!(response.status(), StatusCode::OK);
     let text = response.into_body().into_string().await.unwrap();
-    assert!(text.starts_with("<h1>rev two</h1>"));
+    // the document's own HTML is untouched; the chrome's measurements go in
+    // front of it, where the parser puts them in the head
+    assert!(text.contains("<h1>rev two</h1>"));
     assert!(text.contains("planenv-overlay"));
     assert!(text.contains("rev 2 (current)"));
     assert!(text.contains(">Share</a>"));
@@ -765,7 +767,7 @@ async fn public_view_password_gate_lifecycle() {
     let response = call(&app, Method::GET, &doc_path, None, with_cookie(&access)).await;
     assert_eq!(response.status(), StatusCode::OK);
     let text = response.into_body().into_string().await.unwrap();
-    assert!(text.starts_with("<h1>rev two</h1>"));
+    assert!(text.contains("<h1>rev two</h1>"));
     assert!(text.contains("planenv-overlay"));
     assert!(!text.contains(">Share</a>"));
 
@@ -780,7 +782,7 @@ async fn public_view_password_gate_lifecycle() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     let text = response.into_body().into_string().await.unwrap();
-    assert!(text.starts_with("<h1>rev one</h1>"));
+    assert!(text.contains("<h1>rev one</h1>"));
     assert!(text.contains("rev 1 of 2"));
 
     // rotating the password kills outstanding cookies
@@ -1163,7 +1165,10 @@ async fn a_scoped_key_is_bound_to_one_document() {
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let tampered = format!("{}00", &key[..key.len() - 2]);
+    // flip the last character rather than overwriting it, so the tampered key
+    // is never the original one
+    let last = if key.ends_with('0') { '1' } else { '0' };
+    let tampered = format!("{}{last}", &key[..key.len() - 1]);
     let response = answer(
         &app,
         "first",
@@ -1352,6 +1357,93 @@ async fn the_owner_gets_the_widget_styles_in_the_page() {
         html.contains("/_planenv/answer.js"),
         "the script still loads"
     );
+}
+
+/// The chrome is fixed over the document, so a document that lays out around it
+/// works from the numbers the server publishes. They are per render: the Share
+/// pill is owner only and the answer pill exists only where questions do, so a
+/// visitor's cluster is narrower than the owner's.
+#[tokio::test]
+async fn the_chrome_publishes_its_measurements() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    let response = push_with_meta(
+        &app,
+        &token,
+        "plan",
+        "<html><head><title>plan</title></head><body><h1 id=\"P4\">plan</h1></body></html>",
+        one_question(),
+    )
+    .await;
+    let id = json_body(response).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let doc_path = format!("/{id}/plan/");
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(doc_path.parse().unwrap())
+        .header(header::HOST, host_of(&doc_path))
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .finish();
+    let owner_html = app
+        .get_response(request)
+        .await
+        .into_body()
+        .into_string()
+        .await
+        .unwrap();
+
+    assert!(owner_html.contains("--planenv-chrome-h: 38px"));
+    assert!(
+        owner_html.contains(r#"[data-planenv-slot="tools"] { width: var(--planenv-tools-w); }"#)
+    );
+    let head_end = owner_html.find("</head>").expect("the document has a head");
+    let published = owner_html
+        .find("--planenv-tools-w")
+        .expect("the chrome publishes its width");
+    assert!(
+        published < head_end,
+        "the measurements belong in the head, where a document's own stylesheet still outranks them"
+    );
+
+    call(
+        &app,
+        Method::POST,
+        "/api/docs/plan/publish",
+        Some(json!({ "password": "visitorpass" })),
+        with_cookie(&cookie),
+    )
+    .await;
+    let access = access_cookie_of(&unlock(&app, &doc_path, "visitorpass").await);
+    let visitor_html = call(&app, Method::GET, &doc_path, None, with_cookie(&access))
+        .await
+        .into_body()
+        .into_string()
+        .await
+        .unwrap();
+
+    assert!(
+        published_width(&visitor_html, "--planenv-tools-w")
+            < published_width(&owner_html, "--planenv-tools-w"),
+        "a visitor has neither the Share pill nor the answer pill"
+    );
+    assert_eq!(
+        published_width(&visitor_html, "--planenv-brand-w"),
+        published_width(&owner_html, "--planenv-brand-w"),
+        "the brand cluster is the same for both"
+    );
+}
+
+fn published_width(html: &str, name: &str) -> u32 {
+    let at = html.find(name).expect("the chrome publishes this name");
+    html[at..]
+        .split_once(": ")
+        .and_then(|(_, rest)| rest.split_once("px"))
+        .and_then(|(width, _)| width.parse().ok())
+        .expect("a width in px")
 }
 
 #[tokio::test]
