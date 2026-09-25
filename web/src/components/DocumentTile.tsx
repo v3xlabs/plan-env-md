@@ -24,7 +24,7 @@ export const DocumentTile = (properties: Properties) => {
     <Link
       to="/documents/$slug"
       params={{ slug: document().slug }}
-      class="flex min-w-0 items-center gap-2.5 px-3 py-2 hover:bg-surface"
+      class="group flex min-w-0 items-center gap-2.5 px-3 py-2 hover:bg-surface"
     >
       <Thumbnail slug={document().slug} class="h-10 w-16 rounded border border-line" />
 

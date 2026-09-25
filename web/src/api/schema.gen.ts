@@ -1143,6 +1143,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/docs/{slug}/placeholder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A revision's drawn placeholder: an SVG of the page's layout in its own
+         *     colours, captured with the thumbnail. Owner only, like the thumbnail.
+         * @description It is built server side from checked values, but opening it directly
+         *     still gets a policy that forbids scripts and fetches, so a gap in that
+         *     check cannot become script on the app origin.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    scheme?: components["schemas"]["Scheme"];
+                    revision?: number;
+                };
+                header?: never;
+                path: {
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: {
+                    headers: {
+                        "CONTENT-TYPE": string;
+                        "CACHE-CONTROL": string;
+                        "CONTENT-SECURITY-POLICY": string;
+                        "X-CONTENT-TYPE-OPTIONS": string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description No such revision, or its placeholder is not drawn yet or could not be */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docs/{slug}/preview/refresh": {
         parameters: {
             query?: never;

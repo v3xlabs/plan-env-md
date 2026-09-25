@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO revision_previews (revision_id, scheme, status)\n             VALUES (?, ?, 'pending')\n             ON CONFLICT (revision_id, scheme)\n             DO UPDATE SET status = 'pending', attempts = 0, error = NULL,\n                           updated_at = datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "2579ff0d3bdb6a24d6462ea28d3fb91b7286f50697997667b2f0d7242409719f"
+}

@@ -20,6 +20,16 @@ pub enum Scheme {
     Dark,
 }
 
+impl Scheme {
+    /// The value stored in `revision_previews.scheme`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+}
+
 #[derive(Object)]
 struct ProjectBody {
     slug: String,

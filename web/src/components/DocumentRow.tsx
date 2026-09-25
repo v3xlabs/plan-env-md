@@ -18,7 +18,7 @@ export const DocumentRow = (properties: Properties) => {
   const unanswered = () => document().questions_total - document().questions_answered;
 
   return (
-    <li class="flex items-start gap-3 py-3">
+    <li class="group flex items-start gap-3 py-3">
       <div class="flex w-10 shrink-0 justify-end gap-1 pt-1 text-base text-muted">
         <For each={document().tags.slice(0, 2)}>
           {(tag) => {

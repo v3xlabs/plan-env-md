@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.placeholder as \"placeholder!: String\"\n               FROM revision_previews p\n               JOIN revisions r ON r.id = p.revision_id\n               JOIN documents d ON d.id = r.document_id\n               WHERE d.owner_id = ? AND d.slug = ? AND p.scheme = ?\n                 AND p.placeholder IS NOT NULL\n                 AND r.revision = COALESCE(?, (SELECT MAX(revision) FROM revisions\n                                               WHERE document_id = d.id))",
+  "describe": {
+    "columns": [
+      {
+        "name": "placeholder!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "52a172ea65c85bf6a84303d07ab0e9fdb24470d6052d9794608430b9dd61d83f"
+}

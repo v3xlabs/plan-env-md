@@ -1,4 +1,5 @@
-//! Renders a thumbnail of each revision, in both colour schemes.
+//! Renders a thumbnail of each revision, in both colour schemes, and a drawn
+//! placeholder from the same settled page.
 //!
 //! Chromium navigates a loopback-only route that serves the revision without
 //! the viewer overlay, so a thumbnail shows the document rather than the
@@ -27,6 +28,8 @@ const MAX_ATTEMPTS: i64 = 3;
 /// Time for a pinned esm.sh module (Shiki, charts) to run after load.
 const SETTLE: Duration = Duration::from_millis(900);
 const IDLE_POLL: Duration = Duration::from_secs(5);
+/// A document's scripts share the page with the walk and can stall it.
+const WALK_LIMIT: Duration = Duration::from_secs(5);
 
 pub fn spawn(pool: SqlitePool, port: u16, blobs: Option<crate::blobs::Blobs>) {
     let Ok(chromium) = std::env::var("PREVIEW_CHROMIUM") else {
@@ -112,12 +115,19 @@ async fn claim(pool: &SqlitePool) -> Option<Job> {
     .ok()?
 }
 
+/// What one job produces. The placeholder is optional: a page whose layout
+/// cannot be read still has a perfectly good screenshot.
+struct Capture {
+    image: Vec<u8>,
+    placeholder: Option<String>,
+}
+
 async fn render(
     browser: &Browser,
     port: u16,
     revision_id: i64,
     scheme: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Capture, String> {
     let page = browser
         .new_page("about:blank")
         .await
@@ -135,7 +145,7 @@ async fn capture(
     port: u16,
     revision_id: i64,
     scheme: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Capture, String> {
     let url = format!("http://127.0.0.1:{port}/_render/{revision_id}/");
 
     let media: SetEmulatedMediaParams = SetEmulatedMediaParamsBuilder::default()
@@ -157,52 +167,81 @@ async fn capture(
 
     // the viewport, not the full page: a full capture of a long plan is a tall
     // sliver that reads as noise at thumbnail size
-    page.screenshot(
-        CaptureScreenshotParams::builder()
-            .format(CaptureScreenshotFormat::Webp)
-            .quality(75)
-            .clip(Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: f64::from(WIDTH),
-                height: f64::from(HEIGHT),
-                scale: SCALE,
-            })
-            .capture_beyond_viewport(true)
-            .build(),
+    let image = page
+        .screenshot(
+            CaptureScreenshotParams::builder()
+                .format(CaptureScreenshotFormat::Webp)
+                .quality(75)
+                .clip(Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: f64::from(WIDTH),
+                    height: f64::from(HEIGHT),
+                    scale: SCALE,
+                })
+                .capture_beyond_viewport(true)
+                .build(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let placeholder = walk(page)
+        .await
+        .inspect_err(|error| tracing::warn!(revision_id, scheme, %error, "placeholder failed"))
+        .ok();
+    Ok(Capture { image, placeholder })
+}
+
+/// Reads the layout of the page as it is now, after the screenshot, so both
+/// describe the same settled frame.
+async fn walk(page: &chromiumoxide::Page) -> Result<String, String> {
+    let evaluation = tokio::time::timeout(
+        WALK_LIMIT,
+        page.evaluate_function(crate::placeholder::WALKER),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|_| "the layout walk timed out".to_string())?
+    .map_err(|e| e.to_string())?;
+    let layout = evaluation
+        .into_value::<serde_json::Value>()
+        .map_err(|e| e.to_string())?;
+    crate::placeholder::render(layout)
 }
 
 async fn finish(
     pool: &SqlitePool,
     blobs: Option<&crate::blobs::Blobs>,
     job: &Job,
-    outcome: Result<Vec<u8>, String>,
+    outcome: Result<Capture, String>,
 ) {
     let width = (f64::from(WIDTH) * SCALE) as i64;
     let height = (f64::from(HEIGHT) * SCALE) as i64;
 
     // a thumbnail is derived data, so it goes straight to the bucket when there
-    // is one rather than being written inline for the sweep to move later
+    // is one rather than being written inline for the sweep to move later. The
+    // placeholder is a few kilobytes of text and always stays inline.
     let outcome = match (outcome, blobs) {
-        (Ok(image), Some(blobs)) => blobs.put(&image).await.map(|key| (None, Some(key))),
-        (Ok(image), None) => Ok((Some(image), None)),
+        (Ok(capture), Some(blobs)) => blobs
+            .put(&capture.image)
+            .await
+            .map(|key| (None, Some(key), capture.placeholder)),
+        (Ok(capture), None) => Ok((Some(capture.image), None, capture.placeholder)),
         (Err(error), _) => Err(error),
     };
 
     let result = match outcome {
-        Ok((image, object_key)) => {
+        Ok((image, object_key, placeholder)) => {
             sqlx::query!(
                 "UPDATE revision_previews
                  SET status = 'ready', image = ?, object_key = ?, content_type = 'image/webp',
-                     width = ?, height = ?, error = NULL, updated_at = datetime('now')
+                     width = ?, height = ?, placeholder = ?, error = NULL,
+                     updated_at = datetime('now')
                  WHERE revision_id = ? AND scheme = ?",
                 image,
                 object_key,
                 width,
                 height,
+                placeholder,
                 job.revision_id,
                 job.scheme
             )
@@ -232,12 +271,17 @@ async fn finish(
 }
 
 /// Queue both schemes for a revision. Called inside the push transaction, so
-/// the worker cannot observe a half written revision.
+/// the worker cannot observe a half written revision. A row that already holds
+/// a capture keeps it, so a re-render shows the old picture until the new one
+/// lands rather than a blank.
 pub async fn enqueue(tx: &mut sqlx::SqliteConnection, revision_id: i64) -> Result<(), sqlx::Error> {
     for scheme in ["light", "dark"] {
         sqlx::query!(
-            "INSERT OR REPLACE INTO revision_previews (revision_id, scheme, status)
-             VALUES (?, ?, 'pending')",
+            "INSERT INTO revision_previews (revision_id, scheme, status)
+             VALUES (?, ?, 'pending')
+             ON CONFLICT (revision_id, scheme)
+             DO UPDATE SET status = 'pending', attempts = 0, error = NULL,
+                           updated_at = datetime('now')",
             revision_id,
             scheme
         )

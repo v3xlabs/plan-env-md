@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod demote;
 mod grant;
+mod placeholder;
 mod preview;
 mod rate_limit;
 mod static_files;

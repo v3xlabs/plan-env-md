@@ -2253,12 +2253,21 @@ async fn the_render_route_serves_the_entry_and_its_assets_over_loopback() {
     assert!(asset.contains("h1{color:red}"), "asset: {asset}");
 }
 
+/// A refresh queues the render again but keeps the stored capture, so the
+/// list shows the old picture until the new one lands rather than a blank.
 #[tokio::test]
 async fn refreshing_a_preview_requeues_a_stored_one() {
-    let app = test_app().await;
+    let (app, pool, _) = test_app_with_blobs(None).await;
     let cookie = session_cookie_of(&register(&app, "admin", None).await);
     let token = agent_token(&app, &cookie).await;
     push(&app, &token, "plan", "<h1>plan</h1>").await;
+    sqlx::query(
+        "UPDATE revision_previews
+         SET status = 'ready', image = x'00', content_type = 'image/webp', attempts = 1",
+    )
+    .execute(&pool)
+    .await
+    .expect("the worker's write");
 
     let response = call(
         &app,
@@ -2270,6 +2279,21 @@ async fn refreshing_a_preview_requeues_a_stored_one() {
     .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
+    let statuses: Vec<String> = sqlx::query_scalar("SELECT status FROM revision_previews")
+        .fetch_all(&pool)
+        .await
+        .expect("the rows");
+    assert_eq!(statuses, ["pending", "pending"]);
+    let response = call(
+        &app,
+        Method::GET,
+        "/api/docs/plan/preview",
+        None,
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
     let response = call(
         &app,
         Method::POST,
@@ -2278,6 +2302,75 @@ async fn refreshing_a_preview_requeues_a_stored_one() {
         with_cookie(&cookie),
     )
     .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// The walk runs inside the document, so a document can hand back anything.
+/// Page text must reach the SVG as text, and a value that is not a colour must
+/// not reach an attribute, while the honest boxes around it still draw.
+#[test]
+fn a_placeholder_escapes_page_text_and_drops_forged_values() {
+    let svg = crate::placeholder::render(json!({
+        "width": 1280,
+        "height": 800,
+        "canvas": "#0e0e0e",
+        "boxes": [
+            { "kind": "heading", "x": 40, "y": 40, "w": 600, "h": 48, "size": 40,
+              "color": "#ffffff", "weight": 700,
+              "text": "</text><script>alert(1)</script>" },
+            { "kind": "surface", "x": 0, "y": 0, "w": 100, "h": 100, "radius": 0,
+              "fill": "#fff\" onload=\"alert(1)", "fillAlpha": 1, "gradient": null,
+              "stroke": null, "strokeWidth": 0 },
+            // JSON.stringify writes NaN as null
+            { "kind": "rule", "x": null, "y": 10, "w": 10, "h": 1, "color": "#123456", "alpha": 1 },
+            { "kind": "rule", "x": 0, "y": 120, "w": 1280, "h": 1, "color": "#abcdef", "alpha": 1 },
+        ],
+    }))
+    .expect("the frame is valid");
+
+    assert!(!svg.contains("<script"), "{svg}");
+    assert!(
+        svg.contains("&lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "{svg}"
+    );
+    assert!(!svg.contains("onload"), "{svg}");
+    assert!(!svg.contains("#123456"), "{svg}");
+    assert!(svg.contains(r##"fill="#abcdef""##), "{svg}");
+    assert!(svg.contains(r##"fill="#0e0e0e""##), "{svg}");
+}
+
+#[tokio::test]
+async fn a_placeholder_is_served_once_drawn_and_never_runs_as_a_page() {
+    let (app, pool, _) = test_app_with_blobs(None).await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push(&app, &token, "plan", "<h1>plan</h1>").await;
+
+    let path = "/api/docs/plan/placeholder?scheme=dark";
+    let response = call(&app, Method::GET, path, None, with_cookie(&cookie)).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    sqlx::query(
+        "UPDATE revision_previews SET status = 'ready', image = x'00', placeholder = '<svg/>'
+         WHERE scheme = 'dark'",
+    )
+    .execute(&pool)
+    .await
+    .expect("the worker's write");
+
+    let response = call(&app, Method::GET, path, None, with_cookie(&cookie)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers();
+    assert_eq!(headers[header::CONTENT_TYPE], "image/svg+xml");
+    assert_eq!(
+        headers[header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'"
+    );
+    assert_eq!(response.into_body().into_string().await.unwrap(), "<svg/>");
+
+    // the light row has not been drawn, and it does not borrow the dark one
+    let light = "/api/docs/plan/placeholder";
+    let response = call(&app, Method::GET, light, None, with_cookie(&cookie)).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 

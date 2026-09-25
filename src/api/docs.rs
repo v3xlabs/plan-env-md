@@ -368,6 +368,21 @@ enum PreviewImageResponse {
 }
 
 #[derive(ApiResponse)]
+enum PlaceholderResponse {
+    #[oai(status = 200)]
+    Ok(
+        poem_openapi::payload::Binary<Vec<u8>>,
+        #[oai(header = "Content-Type")] String,
+        #[oai(header = "Cache-Control")] String,
+        #[oai(header = "Content-Security-Policy")] String,
+        #[oai(header = "X-Content-Type-Options")] String,
+    ),
+    /// No such revision, or its placeholder is not drawn yet or could not be
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
 enum DeleteDocumentResponse {
     #[oai(status = 204)]
     Done,
@@ -1014,17 +1029,20 @@ impl DocsApi {
         scheme: Query<Option<crate::api::projects::Scheme>>,
         revision: Query<Option<i64>>,
     ) -> poem::Result<PreviewImageResponse> {
-        let wanted = match scheme.0.unwrap_or(crate::api::projects::Scheme::Light) {
-            crate::api::projects::Scheme::Light => "light",
-            crate::api::projects::Scheme::Dark => "dark",
-        };
+        let wanted = scheme
+            .0
+            .unwrap_or(crate::api::projects::Scheme::Light)
+            .as_str();
         let row = sqlx::query!(
             r#"SELECT p.image as "image: Vec<u8>", p.object_key as "object_key: String",
                       p.content_type as "content_type!: String"
                FROM revision_previews p
                JOIN revisions r ON r.id = p.revision_id
                JOIN documents d ON d.id = r.document_id
-               WHERE d.owner_id = ? AND d.slug = ? AND p.scheme = ? AND p.status = 'ready'
+               WHERE d.owner_id = ? AND d.slug = ? AND p.scheme = ?
+                 -- a re-render keeps the last capture, which stays served until
+                 -- the new one replaces it
+                 AND (p.image IS NOT NULL OR p.object_key IS NOT NULL)
                  AND r.revision = COALESCE(?, (SELECT MAX(revision) FROM revisions
                                                WHERE document_id = d.id))"#,
             auth.user().id,
@@ -1047,6 +1065,55 @@ impl DocsApi {
                 "private, max-age=300".to_string(),
             ),
             None => PreviewImageResponse::NotFound,
+        })
+    }
+
+    /// A revision's drawn placeholder: an SVG of the page's layout in its own
+    /// colours, captured with the thumbnail. Owner only, like the thumbnail.
+    ///
+    /// It is built server side from checked values, but opening it directly
+    /// still gets a policy that forbids scripts and fetches, so a gap in that
+    /// check cannot become script on the app origin.
+    #[oai(path = "/docs/:slug/placeholder", method = "get")]
+    async fn placeholder(
+        &self,
+        pool: Data<&SqlitePool>,
+        auth: Auth,
+        slug: Path<String>,
+        scheme: Query<Option<crate::api::projects::Scheme>>,
+        revision: Query<Option<i64>>,
+    ) -> poem::Result<PlaceholderResponse> {
+        let wanted = scheme
+            .0
+            .unwrap_or(crate::api::projects::Scheme::Light)
+            .as_str();
+        let placeholder = sqlx::query_scalar!(
+            r#"SELECT p.placeholder as "placeholder!: String"
+               FROM revision_previews p
+               JOIN revisions r ON r.id = p.revision_id
+               JOIN documents d ON d.id = r.document_id
+               WHERE d.owner_id = ? AND d.slug = ? AND p.scheme = ?
+                 AND p.placeholder IS NOT NULL
+                 AND r.revision = COALESCE(?, (SELECT MAX(revision) FROM revisions
+                                               WHERE document_id = d.id))"#,
+            auth.user().id,
+            slug.0,
+            wanted,
+            revision.0
+        )
+        .fetch_optional(pool.0)
+        .await
+        .map_err(internal)?;
+
+        Ok(match placeholder {
+            Some(svg) => PlaceholderResponse::Ok(
+                poem_openapi::payload::Binary(svg.into_bytes()),
+                "image/svg+xml".to_string(),
+                "private, max-age=300".to_string(),
+                "default-src 'none'".to_string(),
+                "nosniff".to_string(),
+            ),
+            None => PlaceholderResponse::NotFound,
         })
     }
 

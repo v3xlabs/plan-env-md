@@ -7,37 +7,63 @@ type Properties = {
   class?: string;
 };
 
-/// The rendered preview, over a drawn page that stands in for one. The worker
-/// renders a preview per revision, so a document is usually looked at before
-/// its picture exists, and a 404 means the worker has not reached this
-/// revision yet or is switched off entirely. The drawn page covers both, and
-/// covers the wait on a slow connection.
+type ImageState = "loading" | "loaded" | "missing";
+
+/// The drawn placeholder at rest, and the rendered screenshot while the
+/// nearest `group` ancestor is hovered or holds focus. Both come from one
+/// worker job per revision, so a 404 means the worker has not reached this
+/// revision yet or is switched off; the skeleton underneath covers that and
+/// the wait on a slow connection. A revision rendered before placeholders
+/// existed has only its screenshot, which then shows at rest.
 export const Thumbnail = (properties: Properties) => {
-  const [isMissing, setMissing] = createSignal(false);
-  const [isLoaded, setLoaded] = createSignal(false);
-  const preview = (scheme?: "dark") => {
-    const path = `/api/docs/${encodeURIComponent(properties.slug)}/preview`;
+  const [screenshot, setScreenshot] = createSignal<ImageState>("loading");
+  const [placeholder, setPlaceholder] = createSignal<ImageState>("loading");
+  const source = (kind: "preview" | "placeholder", scheme?: "dark") => {
+    const path = `/api/docs/${encodeURIComponent(properties.slug)}/${kind}`;
 
     return scheme === undefined ? path : `${path}?scheme=${scheme}`;
+  };
+  const screenshotOpacity = () => {
+    if (screenshot() !== "loaded") return "opacity-0";
+
+    if (placeholder() === "missing") return "opacity-100";
+
+    // a touch screen has no hover, so it keeps the screenshot
+    return "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
   };
 
   return (
     <div class={clsx("thumb-skeleton relative shrink-0 overflow-hidden", properties.class)}>
-      <Show when={!isMissing()}>
-        {/* Both schemes are rendered per revision, so a reader in dark mode
-            sees the document as they would open it. */}
+      {/* Both schemes are captured per revision, so a reader in dark mode
+          sees the document as they would open it. */}
+      <Show when={screenshot() !== "missing"}>
+        <Show when={placeholder() !== "missing"}>
+          <picture class="contents">
+            <source media="(prefers-color-scheme: dark)" srcset={source("placeholder", "dark")} />
+            <img
+              src={source("placeholder")}
+              alt=""
+              loading="lazy"
+              onLoad={() => setPlaceholder("loaded")}
+              onError={() => setPlaceholder("missing")}
+              class={clsx(
+                "absolute inset-0 z-10 size-full object-cover object-top",
+                placeholder() === "loaded" ? "opacity-100" : "opacity-0",
+              )}
+            />
+          </picture>
+        </Show>
         <picture class="contents">
-          <source media="(prefers-color-scheme: dark)" srcset={preview("dark")} />
+          <source media="(prefers-color-scheme: dark)" srcset={source("preview", "dark")} />
           <img
-            src={preview()}
+            src={source("preview")}
             alt=""
             loading="lazy"
-            onLoad={() => setLoaded(true)}
-            onError={() => setMissing(true)}
+            onLoad={() => setScreenshot("loaded")}
+            onError={() => setScreenshot("missing")}
             class={clsx(
-              "relative z-10 size-full bg-surface object-cover object-top",
-              "transition-opacity duration-200",
-              isLoaded() ? "opacity-100" : "opacity-0",
+              "relative z-20 size-full bg-surface object-cover object-top",
+              screenshotOpacity(),
             )}
           />
         </picture>

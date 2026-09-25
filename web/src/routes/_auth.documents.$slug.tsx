@@ -152,7 +152,7 @@ const DocumentPage = () => {
         {document => (
           <div class="space-y-8">
             <header class="flex flex-wrap items-start gap-5">
-              <a href={document().url} class="block h-40 w-64 shrink-0">
+              <a href={document().url} class="group block h-40 w-64 shrink-0">
                 <Thumbnail
                   slug={document().slug}
                   class="size-full rounded border border-line"

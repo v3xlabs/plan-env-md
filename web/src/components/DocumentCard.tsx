@@ -24,7 +24,7 @@ export const DocumentCard = (properties: Properties) => {
     <Link
       to="/documents/$slug"
       params={{ slug: document().slug }}
-      class="block h-full overflow-hidden rounded-lg border border-line bg-surface hover:border-accent"
+      class="group block h-full overflow-hidden rounded-lg border border-line bg-surface hover:border-accent"
     >
       <div class="relative aspect-16/10 border-b border-line">
         <Thumbnail slug={document().slug} class="size-full" />

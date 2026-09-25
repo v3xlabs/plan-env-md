@@ -1167,6 +1167,99 @@
         ]
       }
     },
+    "/api/docs/{slug}/placeholder": {
+      "get": {
+        "summary": "A revision's drawn placeholder: an SVG of the page's layout in its own\ncolours, captured with the thumbnail. Owner only, like the thumbnail.",
+        "description": "It is built server side from checked values, but opening it directly\nstill gets a policy that forbids scripts and fetches, so a gap in that\ncheck cannot become script on the app origin.",
+        "parameters": [
+          {
+            "name": "slug",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "scheme",
+            "schema": {
+              "$ref": "#/components/schemas/Scheme"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "revision",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "CONTENT-TYPE": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "CACHE-CONTROL": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "CONTENT-SECURITY-POLICY": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-CONTENT-TYPE-OPTIONS": {
+                "required": true,
+                "deprecated": false,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such revision, or its placeholder is not drawn yet or could not be"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/docs/{slug}/preview/refresh": {
       "post": {
         "summary": "Queue the latest revision's thumbnail to be rendered again.",
