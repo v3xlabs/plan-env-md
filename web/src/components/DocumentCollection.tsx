@@ -1,6 +1,7 @@
 import { For, Match, Switch } from "solid-js";
 
 import type { DocumentSummary } from "../api/documents";
+import { LIST } from "./Control";
 import { DocumentCard } from "./DocumentCard";
 import { DocumentRow } from "./DocumentRow";
 import { DocumentTile } from "./DocumentTile";
@@ -28,20 +29,21 @@ export const DocumentCollection = (properties: Properties) => (
     )}
   >
     <Match when={properties.view === "list"}>
-      <ul class="divide-y divide-line border-y border-line">
+      <ul class={LIST}>
         <For each={properties.documents}>
           {document => <DocumentRow document={document} showProject={properties.showProject} />}
         </For>
       </ul>
     </Match>
 
-    {/* A one pixel gap over the line colour draws every separator, so the
-        tiles keep the list's hairlines without a border on each one. */}
+    {/* One surface, with a one pixel gap over the hairline colour drawing every
+        separator. A last odd tile spans both columns so no empty cell shows
+        the hairline colour through. */}
     <Match when={properties.view === "tiles"}>
-      <ul class="grid gap-px border-y border-line bg-line sm:grid-cols-2">
+      <ul class="grid gap-px overflow-hidden rounded-panel bg-hairline sm:grid-cols-2">
         <For each={properties.documents}>
           {document => (
-            <li class="min-w-0 bg-bg">
+            <li class="min-w-0 bg-surface sm:odd:last:col-span-2">
               <DocumentTile document={document} showProject={properties.showProject} />
             </li>
           )}

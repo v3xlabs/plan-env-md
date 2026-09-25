@@ -30,6 +30,67 @@ impl Scheme {
     }
 }
 
+/// The colour of a project's mark when it has no icon. The set is closed so
+/// the client can map each value to a design token.
+#[derive(Enum, Clone, Copy, PartialEq, Eq)]
+#[oai(rename_all = "lowercase")]
+pub enum ProjectColor {
+    Red,
+    Orange,
+    Amber,
+    Emerald,
+    Teal,
+    Sky,
+    Indigo,
+    Pink,
+}
+
+impl ProjectColor {
+    /// The value stored in `projects.color`.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Red => "red",
+            Self::Orange => "orange",
+            Self::Amber => "amber",
+            Self::Emerald => "emerald",
+            Self::Teal => "teal",
+            Self::Sky => "sky",
+            Self::Indigo => "indigo",
+            Self::Pink => "pink",
+        }
+    }
+
+    fn from_stored(value: &str) -> Option<Self> {
+        [
+            Self::Red,
+            Self::Orange,
+            Self::Amber,
+            Self::Emerald,
+            Self::Teal,
+            Self::Sky,
+            Self::Indigo,
+            Self::Pink,
+        ]
+        .into_iter()
+        .find(|color| color.as_str() == value)
+    }
+}
+
+#[derive(Object)]
+struct SetColorBody {
+    /// Null returns the project to the colour derived from its slug
+    color: Option<ProjectColor>,
+}
+
+#[derive(ApiResponse)]
+enum SetColorResponse {
+    #[oai(status = 204)]
+    Done,
+    /// No project of this name on this account
+    #[oai(status = 404)]
+    NotFound,
+}
+
 #[derive(Object)]
 struct ProjectBody {
     slug: String,
@@ -40,6 +101,8 @@ struct ProjectBody {
     last_pushed_at: Option<String>,
     has_favicon_light: bool,
     has_favicon_dark: bool,
+    /// Picked colour for the mark; null means derived from the slug
+    color: Option<ProjectColor>,
 }
 
 #[derive(ApiResponse)]
@@ -105,7 +168,8 @@ impl ProjectsApi {
                       COUNT(d.id) as "document_count!: i64",
                       MAX(r.last_pushed_at) as "last_pushed_at: String",
                       p.favicon_light IS NOT NULL as "has_favicon_light!: bool",
-                      p.favicon_dark IS NOT NULL as "has_favicon_dark!: bool"
+                      p.favicon_dark IS NOT NULL as "has_favicon_dark!: bool",
+                      p.color as "color: String"
                FROM projects p
                LEFT JOIN documents d ON d.owner_id = p.owner_id AND d.project = p.slug
                LEFT JOIN (SELECT document_id, MAX(created_at) AS last_pushed_at
@@ -141,6 +205,7 @@ impl ProjectsApi {
                     last_pushed_at: row.last_pushed_at,
                     has_favicon_light: row.has_favicon_light,
                     has_favicon_dark: row.has_favicon_dark,
+                    color: row.color.as_deref().and_then(ProjectColor::from_stored),
                 })
                 .collect(),
         ))
@@ -205,6 +270,33 @@ impl ProjectsApi {
         tx.commit().await.map_err(internal)?;
 
         Ok(AliasResponse::Done)
+    }
+
+    /// Pick the colour a project's mark shows when it has no icon.
+    #[oai(path = "/projects/:project/color", method = "put")]
+    async fn set_color(
+        &self,
+        pool: Data<&SqlitePool>,
+        auth: Auth,
+        project: Path<String>,
+        body: Json<SetColorBody>,
+    ) -> poem::Result<SetColorResponse> {
+        let color = body.0.color.map(ProjectColor::as_str);
+        let done = sqlx::query!(
+            "UPDATE projects SET color = ? WHERE owner_id = ? AND slug = ?",
+            color,
+            auth.user().id,
+            project.0
+        )
+        .execute(pool.0)
+        .await
+        .map_err(internal)?;
+
+        Ok(if done.rows_affected() == 0 {
+            SetColorResponse::NotFound
+        } else {
+            SetColorResponse::Done
+        })
     }
 
     /// Remove an empty project, along with its aliases and icons.

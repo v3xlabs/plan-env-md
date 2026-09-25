@@ -11,10 +11,10 @@ type ModalProperties = {
 export const Modal = (properties: ModalProperties) => (
   <Dialog open={properties.isOpen} onOpenChange={properties.onOpenChange}>
     <Dialog.Portal>
-      <Dialog.Overlay class="fixed inset-0 bg-black/40" />
-      <div class="fixed inset-0 grid place-items-center p-4">
-        <Dialog.Content class="w-full max-w-md rounded-lg border border-line bg-surface p-6 shadow-lg">
-          <Dialog.Title class="mb-4 text-lg font-semibold">{properties.title}</Dialog.Title>
+      <Dialog.Overlay class="fixed inset-0 z-40 bg-slate-950/40" />
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <Dialog.Content class="max-h-[85vh] w-full max-w-md space-y-4 overflow-y-auto rounded-panel bg-surface p-5 shadow-xl ring-1 ring-hairline">
+          <Dialog.Title class="text-base font-semibold">{properties.title}</Dialog.Title>
           {properties.children}
         </Dialog.Content>
       </div>

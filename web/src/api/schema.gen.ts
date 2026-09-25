@@ -588,6 +588,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project}/color": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Pick the colour a project's mark shows when it has no icon. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json; charset=utf-8": components["schemas"]["SetColorBody"];
+                };
+            };
+            responses: {
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No project of this name on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project}": {
         parameters: {
             query?: never;
@@ -1586,7 +1632,15 @@ export interface components {
             last_pushed_at?: string;
             has_favicon_light: boolean;
             has_favicon_dark: boolean;
+            /** @description Picked colour for the mark; null means derived from the slug */
+            color?: components["schemas"]["ProjectColor"] & unknown;
         };
+        /**
+         * @description The colour of a project's mark when it has no icon. The set is closed so
+         *     the client can map each value to a design token.
+         * @enum {string}
+         */
+        ProjectColor: "red" | "orange" | "amber" | "emerald" | "teal" | "sky" | "indigo" | "pink";
         /** PublishRequest */
         PublishRequest: {
             password: string;
@@ -1635,6 +1689,11 @@ export interface components {
         };
         /** @enum {string} */
         Scheme: "light" | "dark";
+        /** SetColorBody */
+        SetColorBody: {
+            /** @description Null returns the project to the colour derived from its slug */
+            color?: components["schemas"]["ProjectColor"] & unknown;
+        };
         /** TokenBody */
         TokenBody: {
             /** Format: int64 */

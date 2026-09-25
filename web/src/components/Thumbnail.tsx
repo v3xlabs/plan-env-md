@@ -1,6 +1,8 @@
 import clsx from "clsx";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 
+import { theme } from "../theme";
+
 type Properties = {
   slug: string;
   /// Sizing and framing for the box; the image fills it.
@@ -39,11 +41,10 @@ export const Thumbnail = (properties: Properties) => {
     });
   });
 
-  const source = (kind: "preview" | "placeholder", scheme?: "dark") => {
-    const path = `/api/docs/${encodeURIComponent(properties.slug)}/${kind}`;
-
-    return scheme === undefined ? path : `${path}?scheme=${scheme}`;
-  };
+  // both schemes are captured per revision, so the picture matches the theme
+  // the reader is using
+  const source = (kind: "preview" | "placeholder") =>
+    `/api/docs/${encodeURIComponent(properties.slug)}/${kind}?scheme=${theme()}`;
   const screenshotOpacity = () => {
     if (screenshot() !== "loaded") return "opacity-0";
 
@@ -57,39 +58,31 @@ export const Thumbnail = (properties: Properties) => {
       ref={element => (frame = element)}
       class={clsx("thumb-skeleton relative shrink-0 overflow-hidden", properties.class)}
     >
-      {/* Both schemes are captured per revision, so a reader in dark mode
-          sees the document as they would open it. */}
       <Show when={placeholder() !== "missing"}>
-        <picture class="contents">
-          <source media="(prefers-color-scheme: dark)" srcset={source("placeholder", "dark")} />
-          <img
-            src={source("placeholder")}
-            alt=""
-            loading="lazy"
-            onLoad={() => setPlaceholder("loaded")}
-            onError={() => setPlaceholder("missing")}
-            class={clsx(
-              "absolute inset-0 z-10 size-full object-cover object-top",
-              placeholder() === "loaded" ? "opacity-100" : "opacity-0",
-            )}
-          />
-        </picture>
+        <img
+          src={source("placeholder")}
+          alt=""
+          loading="lazy"
+          onLoad={() => setPlaceholder("loaded")}
+          onError={() => setPlaceholder("missing")}
+          class={clsx(
+            "absolute inset-0 z-10 size-full object-cover object-top",
+            placeholder() === "loaded" ? "opacity-100" : "opacity-0",
+          )}
+        />
       </Show>
       <Show when={(isWanted() || placeholder() === "missing") && screenshot() !== "missing"}>
-        <picture class="contents">
-          <source media="(prefers-color-scheme: dark)" srcset={source("preview", "dark")} />
-          <img
-            src={source("preview")}
-            alt=""
-            loading="lazy"
-            onLoad={() => setScreenshot("loaded")}
-            onError={() => setScreenshot("missing")}
-            class={clsx(
-              "relative z-20 size-full bg-surface object-cover object-top",
-              screenshotOpacity(),
-            )}
-          />
-        </picture>
+        <img
+          src={source("preview")}
+          alt=""
+          loading="lazy"
+          onLoad={() => setScreenshot("loaded")}
+          onError={() => setScreenshot("missing")}
+          class={clsx(
+            "relative z-20 size-full bg-surface object-cover object-top",
+            screenshotOpacity(),
+          )}
+        />
       </Show>
     </div>
   );

@@ -1,9 +1,8 @@
 import { Link } from "@tanstack/solid-router";
-import { For, Show } from "solid-js";
+import { Show } from "solid-js";
 
 import type { DocumentSummary } from "../api/documents";
-import { absolute, relative } from "../time";
-import { iconForTag, LockIcon, PublishedIcon } from "./Icon";
+import { Answered, PushedAt, TagMark, Visibility } from "./DocumentMarks";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { Thumbnail } from "./Thumbnail";
 
@@ -15,80 +14,54 @@ type Properties = {
 
 export const DocumentRow = (properties: Properties) => {
   const document = () => properties.document;
-  const unanswered = () => document().questions_total - document().questions_answered;
 
   return (
-    <li class="group flex items-start gap-3 py-3">
-      <div class="flex w-10 shrink-0 justify-end gap-1 pt-1 text-base text-muted">
-        <For each={document().tags.slice(0, 2)}>
-          {(tag) => {
-            const TagIcon = iconForTag(tag);
-
-            return <TagIcon aria-label={tag} title={tag} />;
-          }}
-        </For>
-      </div>
-
-      <a href={document().url} class="hidden h-15 w-24 shrink-0 sm:block">
-        <Thumbnail slug={document().slug} class="size-full rounded border border-line" />
+    <li class="group flex items-center gap-4 px-5 py-3 hover:bg-raised">
+      <a href={document().url} class="hidden shrink-0 sm:block" aria-label={`Open ${document().title ?? document().slug}`}>
+        <Thumbnail slug={document().slug} class="h-15 w-24 rounded-md" />
       </a>
 
       <div class="min-w-0 flex-1">
         <Link
           to="/documents/$slug"
           params={{ slug: document().slug }}
-          class="font-medium text-ink hover:text-accent"
+          class="block truncate text-sm font-medium text-slate-900 dark:text-slate-100"
         >
           {document().title ?? document().slug}
         </Link>
-        <p class="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted">
+        <p class="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
           <Show when={(properties.showProject ?? true) && document().project}>
             {project => (
-              <Link
-                to="/projects/$project"
-                params={{ project: project() }}
-                class="flex shrink-0 items-center gap-1 text-ink hover:text-accent"
-              >
-                <ProjectFavicon project={project()} has class="size-3.5" />
-                {project()}
-              </Link>
+              <>
+                <Link
+                  to="/projects/$project"
+                  params={{ project: project() }}
+                  class="flex shrink-0 items-center gap-1.5 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                >
+                  <ProjectFavicon project={project()} class="size-4" />
+                  {project()}
+                </Link>
+                <span aria-hidden="true">-</span>
+              </>
             )}
           </Show>
-          <span class="truncate">
-            {document().slug}
-            {" - "}
-            rev
-            {" "}
-            {document().latest_revision}
-            <Show when={document().questions_total > 0}>
-              {" - "}
-              <span class={unanswered() > 0 ? "text-accent" : undefined}>
-                {document().questions_answered}
-                {" of "}
-                {document().questions_total}
-                {" answered"}
-              </span>
-            </Show>
-          </span>
+          <span class="truncate font-mono">{document().slug}</span>
+          <span aria-hidden="true">-</span>
+          <span class="shrink-0">{`rev ${document().latest_revision}`}</span>
         </p>
       </div>
 
-      <div class="w-36 shrink-0 text-right">
-        <time datetime={document().last_pushed_at} class="block text-xs text-ink">
-          {absolute(document().last_pushed_at)}
-        </time>
-        <span class="text-xs text-muted">{relative(document().last_pushed_at)}</span>
+      <div class="flex shrink-0 items-center gap-3.5 text-xs text-slate-500">
+        {/* On a phone the title needs the width more than these two do. */}
+        <span class="hidden items-center gap-3.5 sm:flex">
+          <Answered document={document()} />
+          <Show when={document().tags[0]}>
+            {tag => <TagMark tag={tag()} showLabel />}
+          </Show>
+        </span>
+        <Visibility published={document().published} />
+        <PushedAt at={document().last_pushed_at} class="w-14 text-right" />
       </div>
-
-      <a
-        href={document().url}
-        class="mt-0.5 shrink-0 text-base text-muted hover:text-ink"
-        title={document().published ? "Published" : "Private"}
-      >
-        <Show when={document().published} fallback={<LockIcon aria-label="Private" />}>
-          <PublishedIcon aria-label="Published" />
-        </Show>
-      </a>
     </li>
   );
 };

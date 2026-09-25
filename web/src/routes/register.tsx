@@ -4,6 +4,7 @@ import { createSignal, Show } from "solid-js";
 
 import { register } from "../api/auth";
 import { Button } from "../components/Button";
+import { ERROR, LINK, PAGE_TITLE } from "../components/Control";
 import { TextInput } from "../components/TextInput";
 
 const RegisterPage = () => {
@@ -22,10 +23,9 @@ const RegisterPage = () => {
   }));
 
   return (
-    <div class="mx-auto mt-16 max-w-xs">
-      <h1 class="mb-6 text-xl font-semibold">Create an account</h1>
+    <div class="mx-auto mt-12 max-w-sm space-y-4">
       <form
-        class="space-y-4"
+        class="space-y-4 rounded-panel bg-surface p-6"
         onSubmit={(event) => {
           event.preventDefault();
           const code = inviteCode().trim();
@@ -37,6 +37,7 @@ const RegisterPage = () => {
           });
         }}
       >
+        <h1 class={PAGE_TITLE}>Create an account</h1>
         <TextInput
           label="Username"
           name="username"
@@ -63,20 +64,20 @@ const RegisterPage = () => {
           value={inviteCode()}
           onInput={event => setInviteCode(event.currentTarget.value)}
         />
-        <p class="text-xs text-muted">
+        <p class="text-xs text-slate-500">
           The very first account on a fresh instance needs no invite code.
         </p>
         <Show when={mutation.error}>
-          {error => <p class="text-sm text-red-700 dark:text-red-400">{error().message}</p>}
+          {error => <p class={ERROR} role="alert">{error().message}</p>}
         </Show>
         <Button type="submit" class="w-full" disabled={mutation.isPending}>
-          {mutation.isPending ? "Creating" : "Create account"}
+          {mutation.isPending ? "Creating..." : "Create account"}
         </Button>
       </form>
-      <p class="mt-4 text-sm text-muted">
+      <p class="text-center text-sm text-slate-500">
         Already registered?
         {" "}
-        <a href="/login" class="text-accent hover:underline">
+        <a href="/login" class={LINK}>
           Log in
         </a>
       </p>
