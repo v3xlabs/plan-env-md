@@ -1,49 +1,37 @@
-import clsx from "clsx";
-import type { IconTypes } from "solid-icons";
 import { TbOutlineLayoutColumns, TbOutlineLayoutGrid, TbOutlineList } from "solid-icons/tb";
-import { For } from "solid-js";
+import { createSignal } from "solid-js";
+
+import { Segmented, type SegmentedOption } from "./Segmented";
 
 /// How a page lays its documents out.
-const VIEWS = ["list", "tiles", "cards"] as const;
+const VIEW_OPTIONS = [
+  { value: "list", label: "List", icon: TbOutlineList },
+  { value: "tiles", label: "Two columns", icon: TbOutlineLayoutColumns },
+  { value: "cards", label: "Cards", icon: TbOutlineLayoutGrid },
+] as const satisfies readonly SegmentedOption<string>[];
 
-export type View = typeof VIEWS[number];
+export type View = typeof VIEW_OPTIONS[number]["value"];
 
-const APPEARANCE: Record<View, { icon: IconTypes; label: string; }> = {
-  list: { icon: TbOutlineList, label: "List" },
-  tiles: { icon: TbOutlineLayoutColumns, label: "Two columns" },
-  cards: { icon: TbOutlineLayoutGrid, label: "Cards" },
+const STORAGE_KEY = "plan-env-md-view";
+
+// One preference for every page that lists documents: a reader who likes
+// cards likes them on a project page too.
+const [preferredView, setView] = createSignal<View>(
+  VIEW_OPTIONS.find(option => option.value === localStorage.getItem(STORAGE_KEY))?.value ?? "list",
+);
+
+export { preferredView };
+
+const choose = (view: View) => {
+  localStorage.setItem(STORAGE_KEY, view);
+  setView(view);
 };
 
-export const parseView = (value: unknown): View | undefined =>
-  VIEWS.find(view => view === value);
-
-type Properties = {
-  value: View;
-  onChange: (view: View) => void;
-};
-
-export const ViewToggle = (properties: Properties) => (
-  <div class="flex shrink-0 divide-x divide-line overflow-hidden rounded-md border border-line">
-    <For each={VIEWS}>
-      {(view) => {
-        const { icon: ViewIcon, label } = APPEARANCE[view];
-
-        return (
-          <button
-            type="button"
-            onClick={() => properties.onChange(view)}
-            title={label}
-            aria-label={label}
-            aria-pressed={properties.value === view}
-            class={clsx(
-              "px-2 py-1.5 hover:text-ink",
-              properties.value === view ? "bg-surface text-ink" : "text-muted",
-            )}
-          >
-            <ViewIcon class="size-4" aria-hidden="true" />
-          </button>
-        );
-      }}
-    </For>
-  </div>
+export const ViewToggle = () => (
+  <Segmented
+    label="Layout"
+    options={VIEW_OPTIONS}
+    value={preferredView()}
+    onChange={choose}
+  />
 );

@@ -5,6 +5,7 @@ import { createSignal, For, Show, Suspense } from "solid-js";
 import type { CreatedToken } from "../api/tokens";
 import { createToken, revokeToken, tokensQueryOptions } from "../api/tokens";
 import { Button } from "../components/Button";
+import { EMPTY, ERROR, LIST, PAGE_TITLE, STATUS } from "../components/Control";
 import { CopyBlock } from "../components/CopyBlock";
 import { Modal } from "../components/Modal";
 import { TextInput } from "../components/TextInput";
@@ -37,8 +38,8 @@ const TokensPage = () => {
   }));
 
   return (
-    <div class="space-y-8">
-      <h1 class="text-xl font-semibold">API tokens</h1>
+    <div class="space-y-6">
+      <h1 class={PAGE_TITLE}>API tokens</h1>
 
       <form
         class="flex items-end gap-2"
@@ -57,39 +58,36 @@ const TokensPage = () => {
           />
         </div>
         <Button type="submit" disabled={create.isPending}>
-          Create token
+          {create.isPending ? "Creating..." : "Create token"}
         </Button>
       </form>
       <Show when={create.error}>
-        {error => <p class="text-sm text-red-700 dark:text-red-400">{error().message}</p>}
+        {error => <p class={ERROR} role="alert">{error().message}</p>}
       </Show>
 
-      <Suspense fallback={<p class="text-muted">Loading tokens.</p>}>
+      <Suspense fallback={<p class={STATUS}>Loading tokens...</p>}>
         <Show
           when={tokens.data && tokens.data.length > 0}
-          fallback={<p class="text-muted">No tokens yet.</p>}
+          fallback={<p class={EMPTY}>No tokens yet.</p>}
         >
-          <ul class="divide-y divide-line rounded-lg border border-line bg-surface">
+          <ul class={LIST}>
             <For each={tokens.data}>
               {token => (
-                <li class="flex items-center gap-4 p-4 text-sm">
+                <li class="flex items-center gap-4 px-5 py-3.5">
                   <div class="min-w-0 flex-1">
-                    <p class="font-medium">{token.name}</p>
-                    <p class="font-mono text-xs text-muted">
-                      {token.token_prefix}
-                      ... - created
-                      {" "}
-                      {token.created_at}
-                      {" "}
-                      -
-                      {" "}
-                      {token.last_used_at
-                        ? `last used ${token.last_used_at}`
-                        : "never used"}
+                    <p class="text-sm font-medium text-slate-900 dark:text-slate-100">{token.name}</p>
+                    <p class="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
+                      <span class="font-mono">{`${token.token_prefix}...`}</span>
+                      <span aria-hidden="true">-</span>
+                      <span>{`created ${token.created_at}`}</span>
+                      <span aria-hidden="true">-</span>
+                      <span class="truncate">
+                        {token.last_used_at ? `last used ${token.last_used_at}` : "never used"}
+                      </span>
                     </p>
                   </div>
                   <Button
-                    variant="danger"
+                    variant="secondary"
                     disabled={revoke.isPending}
                     // eslint-disable-next-line no-restricted-syntax -- `id` is the API field name
                     onClick={() => revoke.mutate(token.id)}
@@ -113,7 +111,7 @@ const TokensPage = () => {
         <Show when={createdToken()}>
           {token => (
             <div class="space-y-4">
-              <p class="text-sm text-muted">
+              <p class="text-sm text-slate-600 dark:text-slate-400">
                 This is the only time the full token is shown. Store it in the
                 agent config file:
               </p>

@@ -7,6 +7,16 @@
              prefers-color-scheme rule, so there is nothing to switch here -->
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>plan.env.md</title>
+        <!-- before the first paint, so a dark reader never sees a light frame;
+             src/theme.ts owns the key and keeps the class in step after this -->
+        <script>
+            const saved = localStorage.getItem('plan-env-md-theme');
+            const isDark = saved === null
+                ? matchMedia('(prefers-color-scheme: dark)').matches
+                : saved === 'dark';
+
+            document.documentElement.classList.toggle('dark', isDark);
+        </script>
     </head>
     <body>
         <div id="root"></div>

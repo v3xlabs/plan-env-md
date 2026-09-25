@@ -2,8 +2,7 @@ import { Link } from "@tanstack/solid-router";
 import { Show } from "solid-js";
 
 import type { DocumentSummary } from "../api/documents";
-import { relative } from "../time";
-import { iconForTag, LockIcon, PublishedIcon } from "./Icon";
+import { Answered, PushedAt, TagMark, Visibility } from "./DocumentMarks";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { Thumbnail } from "./Thumbnail";
 
@@ -14,66 +13,45 @@ type Properties = {
   showProject?: boolean;
 };
 
-/// The preview is the card. One tag rather than two, because a card carries
-/// its subject in the picture and the second icon only crowds it.
+/// The preview is the card: each document is its own surface on the canvas.
 export const DocumentCard = (properties: Properties) => {
   const document = () => properties.document;
-  const unanswered = () => document().questions_total - document().questions_answered;
 
   return (
     <Link
       to="/documents/$slug"
       params={{ slug: document().slug }}
-      class="group block h-full overflow-hidden rounded-lg border border-line bg-surface hover:border-accent"
+      class="group flex h-full flex-col overflow-hidden rounded-panel bg-surface hover:bg-raised"
     >
-      <div class="relative aspect-16/10 border-b border-line">
-        <Thumbnail slug={document().slug} class="size-full" />
-        <div class="absolute top-1.5 right-1.5 flex items-center gap-1 rounded border border-line bg-bg px-1 py-0.5 text-sm text-muted">
-          <Show when={document().tags[0]}>
-            {(tag) => {
-              const TagIcon = iconForTag(tag());
+      <Thumbnail slug={document().slug} class="aspect-16/10 w-full" />
 
-              return <TagIcon aria-label={tag()} title={tag()} />;
-            }}
-          </Show>
-          <Show when={document().published} fallback={<LockIcon aria-label="Private" />}>
-            <PublishedIcon aria-label="Published" />
-          </Show>
-        </div>
-      </div>
-
-      <div class="p-2.5">
+      <div class="flex flex-1 flex-col gap-1.5 px-3.5 pt-2.5 pb-3">
         {/* Two lines are reserved whether or not the title fills them, so the
             meta lines of a row of cards sit on one baseline. */}
-        <p class="line-clamp-2 min-h-[2.75em] text-sm leading-snug font-medium text-ink">
+        <p class="line-clamp-2 min-h-[2.75em] text-sm/snug font-medium text-slate-900 dark:text-slate-100">
           {document().title ?? document().slug}
         </p>
-        <p class="mt-1.5 flex items-center gap-1.5 font-mono text-xs text-muted">
+        <p class="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
           <Show
             when={(properties.showProject ?? true) && document().project}
-            fallback={<span class="truncate">{document().slug}</span>}
+            fallback={<span class="truncate font-mono">{document().slug}</span>}
           >
             {project => (
-              <span class="flex min-w-0 items-center gap-1 text-ink">
-                <ProjectFavicon project={project()} has class="size-3.5" />
+              <span class="flex min-w-0 items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                <ProjectFavicon project={project()} class="size-4" />
                 <span class="truncate">{project()}</span>
               </span>
             )}
           </Show>
-          <Show
-            when={unanswered() > 0}
-            fallback={(
-              <time datetime={document().last_pushed_at} class="ml-auto shrink-0">
-                {relative(document().last_pushed_at)}
-              </time>
-            )}
-          >
-            <span class="ml-auto shrink-0 text-accent">
-              {unanswered()}
-              {" open"}
-            </span>
-          </Show>
         </p>
+        <div class="mt-auto flex items-center gap-2.5 pt-1 text-xs text-slate-500">
+          <PushedAt at={document().last_pushed_at} class="mr-auto" />
+          <Answered document={document()} />
+          <Show when={document().tags[0]}>
+            {tag => <TagMark tag={tag()} />}
+          </Show>
+          <Visibility published={document().published} />
+        </div>
       </div>
     </Link>
   );

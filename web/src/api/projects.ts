@@ -1,9 +1,10 @@
 import { queryOptions } from "@tanstack/solid-query";
 
-import { api } from "./fetch";
+import { api, JSON_BODY } from "./fetch";
 import type { components } from "./schema.gen";
 
 export type ProjectSummary = components["schemas"]["ProjectBody"];
+export type ProjectColor = components["schemas"]["ProjectColor"];
 
 export const projectsQueryOptions = queryOptions({
   queryKey: ["projects"],
@@ -18,6 +19,20 @@ export const projectsQueryOptions = queryOptions({
 
 export const faviconUrl = (project: string, scheme: "light" | "dark") =>
   `/api/projects/${encodeURIComponent(project)}/favicon?scheme=${scheme}`;
+
+/// An absent colour returns the project to the one derived from its slug.
+export const setProjectColor = async (input: {
+  project: string;
+  color: ProjectColor | undefined;
+}): Promise<void> => {
+  const response = await api("/api/projects/{project}/color", "put", {
+    path: { project: input.project },
+    contentType: JSON_BODY,
+    data: input.color === undefined ? {} : { color: input.color },
+  });
+
+  if (response.status !== 204) throw new Error(`Could not set the colour (status ${response.status})`);
+};
 
 export const addAlias = async (input: { project: string; alias: string; }): Promise<void> => {
   const response = await api("/api/projects/{project}/aliases/{alias}", "put", {

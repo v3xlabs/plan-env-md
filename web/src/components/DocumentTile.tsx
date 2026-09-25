@@ -1,9 +1,8 @@
 import { Link } from "@tanstack/solid-router";
-import { For, Show } from "solid-js";
+import { Show } from "solid-js";
 
 import type { DocumentSummary } from "../api/documents";
-import { relative } from "../time";
-import { iconForTag, LockIcon, PublishedIcon } from "./Icon";
+import { Answered, PushedAt, TagMark, Visibility } from "./DocumentMarks";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { Thumbnail } from "./Thumbnail";
 
@@ -13,63 +12,46 @@ type Properties = {
   showProject?: boolean;
 };
 
-/// Half the height of a list row, and it keeps the revision and the answer
-/// count. The preview shrinks to a stamp: enough to tell two documents apart,
-/// not enough to read.
+/// Half the height of a list row. The preview shrinks to a stamp: enough to
+/// tell two documents apart, not enough to read.
 export const DocumentTile = (properties: Properties) => {
   const document = () => properties.document;
-  const unanswered = () => document().questions_total - document().questions_answered;
 
   return (
     <Link
       to="/documents/$slug"
       params={{ slug: document().slug }}
-      class="group flex min-w-0 items-center gap-2.5 px-3 py-2 hover:bg-surface"
+      class="group flex h-full min-w-0 items-center gap-3 px-4 py-2.5 hover:bg-raised"
     >
-      <Thumbnail slug={document().slug} class="h-10 w-16 rounded border border-line" />
+      <Thumbnail slug={document().slug} class="h-10 w-16 rounded-md" />
 
       <div class="min-w-0 flex-1">
-        <p class="truncate text-sm font-medium text-ink">
+        <p class="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
           {document().title ?? document().slug}
         </p>
-        <p class="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted">
+        <p class="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
           <Show when={(properties.showProject ?? true) && document().project}>
             {project => (
-              <span class="flex shrink-0 items-center gap-1 text-ink">
-                <ProjectFavicon project={project()} has class="size-3.5" />
-                {project()}
-              </span>
+              <>
+                <span class="flex min-w-0 items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                  <ProjectFavicon project={project()} class="size-4" />
+                  <span class="truncate">{project()}</span>
+                </span>
+                <span aria-hidden="true">-</span>
+              </>
             )}
           </Show>
-          <span class="truncate">
-            rev
-            {" "}
-            {document().latest_revision}
-            {" - "}
-            <Show
-              when={unanswered() > 0}
-              fallback={<time datetime={document().last_pushed_at}>{relative(document().last_pushed_at)}</time>}
-            >
-              <span class="text-accent">
-                {unanswered()}
-                {" open"}
-              </span>
-            </Show>
-          </span>
+          <span class="shrink-0">{`rev ${document().latest_revision}`}</span>
         </p>
       </div>
 
-      <div class="flex shrink-0 items-center gap-1.5 text-base text-muted">
-        <For each={document().tags.slice(0, 1)}>
-          {(tag) => {
-            const TagIcon = iconForTag(tag);
-
-            return <TagIcon aria-label={tag} title={tag} />;
-          }}
-        </For>
-        <Show when={document().published} fallback={<LockIcon aria-label="Private" />}>
-          <PublishedIcon aria-label="Published" />
+      <div class="flex shrink-0 items-center gap-2.5 text-xs text-slate-500">
+        <Answered document={document()} />
+        <Show when={document().tags[0]}>
+          {tag => <TagMark tag={tag()} />}
         </Show>
+        <Visibility published={document().published} />
+        <PushedAt at={document().last_pushed_at} />
       </div>
     </Link>
   );

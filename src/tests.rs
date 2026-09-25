@@ -2137,6 +2137,70 @@ async fn an_alias_is_another_name_for_one_project() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
+/// A picked colour comes back on the list, null returns it to the derived
+/// colour, and only the closed palette is accepted.
+#[tokio::test]
+async fn a_project_colour_is_picked_cleared_and_validated() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    push_with_meta(
+        &app,
+        &token,
+        "plan",
+        "<h1>x</h1>",
+        json!({ "project": "alpha" }),
+    )
+    .await;
+
+    let colour_of_alpha = || async {
+        let body = json_body(
+            call(
+                &app,
+                Method::GET,
+                "/api/projects",
+                None,
+                with_cookie(&cookie),
+            )
+            .await,
+        )
+        .await;
+        body[0]["color"].clone()
+    };
+    assert_eq!(colour_of_alpha().await, Value::Null);
+
+    let set = |color: Value| {
+        call(
+            &app,
+            Method::PUT,
+            "/api/projects/alpha/color",
+            Some(json!({ "color": color })),
+            with_cookie(&cookie),
+        )
+    };
+    assert_eq!(set(json!("teal")).await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(colour_of_alpha().await, json!("teal"));
+
+    assert_eq!(
+        set(json!("chartreuse")).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(colour_of_alpha().await, json!("teal"));
+
+    assert_eq!(set(Value::Null).await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(colour_of_alpha().await, Value::Null);
+
+    let missing = call(
+        &app,
+        Method::PUT,
+        "/api/projects/nothing/color",
+        Some(json!({ "color": "red" })),
+        with_cookie(&cookie),
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn a_project_listing_is_scoped_and_capped() {
     let app = test_app().await;

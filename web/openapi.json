@@ -470,6 +470,49 @@
         ]
       }
     },
+    "/api/projects/{project}/color": {
+      "put": {
+        "summary": "Pick the colour a project's mark shows when it has no icon.",
+        "parameters": [
+          {
+            "name": "project",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SetColorBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "No project of this name on this account"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/projects/{project}": {
       "delete": {
         "summary": "Remove an empty project, along with its aliases and icons.",
@@ -1946,8 +1989,33 @@
           },
           "has_favicon_dark": {
             "type": "boolean"
+          },
+          "color": {
+            "description": "Picked colour for the mark; null means derived from the slug",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectColor"
+              },
+              {
+                "description": "Picked colour for the mark; null means derived from the slug"
+              }
+            ]
           }
         }
+      },
+      "ProjectColor": {
+        "type": "string",
+        "description": "The colour of a project's mark when it has no icon. The set is closed so\nthe client can map each value to a design token.",
+        "enum": [
+          "red",
+          "orange",
+          "amber",
+          "emerald",
+          "teal",
+          "sky",
+          "indigo",
+          "pink"
+        ]
       },
       "PublishRequest": {
         "type": "object",
@@ -2085,6 +2153,23 @@
           "light",
           "dark"
         ]
+      },
+      "SetColorBody": {
+        "type": "object",
+        "title": "SetColorBody",
+        "properties": {
+          "color": {
+            "description": "Null returns the project to the colour derived from its slug",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectColor"
+              },
+              {
+                "description": "Null returns the project to the colour derived from its slug"
+              }
+            ]
+          }
+        }
       },
       "TokenBody": {
         "type": "object",

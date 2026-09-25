@@ -11,11 +11,11 @@ export const CopyBlock = (properties: CopyBlockProperties) => {
 
   return (
     <div class="flex items-start gap-2">
-      <pre class="min-w-0 flex-1 overflow-x-auto rounded-md border border-line bg-bg p-3 font-mono text-xs leading-relaxed">
+      <pre class="min-w-0 flex-1 overflow-x-auto rounded-control bg-raised p-3 text-left font-mono text-xs/relaxed text-slate-700 dark:text-slate-300">
         {properties.text}
       </pre>
       <Button
-        variant="quiet"
+        variant="secondary"
         onClick={() => {
           void navigator.clipboard.writeText(properties.text).then(() => {
             setHasCopied(true);

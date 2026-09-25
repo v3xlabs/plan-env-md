@@ -4,6 +4,7 @@ import { createSignal, Show } from "solid-js";
 
 import { login } from "../api/auth";
 import { Button } from "../components/Button";
+import { ERROR, LINK, PAGE_TITLE } from "../components/Control";
 import { TextInput } from "../components/TextInput";
 
 const LoginPage = () => {
@@ -21,15 +22,15 @@ const LoginPage = () => {
   }));
 
   return (
-    <div class="mx-auto mt-16 max-w-xs">
-      <h1 class="mb-6 text-xl font-semibold">Log in</h1>
+    <div class="mx-auto mt-12 max-w-sm space-y-4">
       <form
-        class="space-y-4"
+        class="space-y-4 rounded-panel bg-surface p-6"
         onSubmit={(event) => {
           event.preventDefault();
           mutation.mutate({ username: username(), password: password() });
         }}
       >
+        <h1 class={PAGE_TITLE}>Log in</h1>
         <TextInput
           label="Username"
           name="username"
@@ -48,16 +49,16 @@ const LoginPage = () => {
           onInput={event => setPassword(event.currentTarget.value)}
         />
         <Show when={mutation.error}>
-          {error => <p class="text-sm text-red-700 dark:text-red-400">{error().message}</p>}
+          {error => <p class={ERROR} role="alert">{error().message}</p>}
         </Show>
         <Button type="submit" class="w-full" disabled={mutation.isPending}>
-          {mutation.isPending ? "Logging in" : "Log in"}
+          {mutation.isPending ? "Logging in..." : "Log in"}
         </Button>
       </form>
-      <p class="mt-4 text-sm text-muted">
+      <p class="text-center text-sm text-slate-500">
         Have an invite?
         {" "}
-        <a href="/register" class="text-accent hover:underline">
+        <a href="/register" class={LINK}>
           Create an account
         </a>
       </p>

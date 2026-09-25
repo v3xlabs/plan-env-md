@@ -2,8 +2,16 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { splitProps } from "solid-js";
 
+import { BUTTON_DANGER, BUTTON_PRIMARY, BUTTON_SECONDARY } from "./Control";
+
 type ButtonProperties = JSX.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "quiet" | "danger";
+  variant?: "primary" | "secondary" | "danger";
+};
+
+const VARIANTS = {
+  primary: BUTTON_PRIMARY,
+  secondary: BUTTON_SECONDARY,
+  danger: BUTTON_DANGER,
 };
 
 export const Button = (properties: ButtonProperties) => {
@@ -13,17 +21,7 @@ export const Button = (properties: ButtonProperties) => {
     <button
       type="button"
       {...rest}
-      class={clsx(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        (local.variant ?? "primary") === "primary"
-        && "bg-accent text-accent-contrast hover:opacity-90",
-        local.variant === "quiet" && "border border-line bg-surface text-ink hover:bg-bg",
-        local.variant === "danger"
-        && "border border-line bg-surface text-red-700 hover:bg-bg dark:text-red-400",
-        local.class,
-      )}
+      class={clsx(VARIANTS[local.variant ?? "primary"], local.class)}
     />
   );
 };

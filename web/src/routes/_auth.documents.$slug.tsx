@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/solid-router";
-import clsx from "clsx";
 import { TbOutlineSettings } from "solid-icons/tb";
 import { createSignal, For, Show, Suspense } from "solid-js";
 
@@ -11,15 +10,24 @@ import {
   refreshPreview,
   unpublishDocument,
 } from "../api/documents";
-import { projectsQueryOptions } from "../api/projects";
 import { Button } from "../components/Button";
+import {
+  BUTTON_PRIMARY,
+  ERROR,
+  GLYPH_RAISED,
+  LINK,
+  LIST,
+  SECTION_TITLE,
+  STATUS,
+} from "../components/Control";
 import { CopyBlock } from "../components/CopyBlock";
-import { iconForTag } from "../components/Icon";
+import { TagMark, Visibility } from "../components/DocumentMarks";
 import { Modal } from "../components/Modal";
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { SettingsSection } from "../components/SettingsSection";
 import { TextInput } from "../components/TextInput";
 import { Thumbnail } from "../components/Thumbnail";
+import { absolute } from "../time";
 
 const formatSize = (sizeBytes: number) =>
   (sizeBytes < 1024 ? `${sizeBytes} B` : `${(sizeBytes / 1024).toFixed(1)} KB`);
@@ -58,15 +66,6 @@ const DocumentPage = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const detail = useQuery(() => documentQueryOptions(parameters().slug));
-  const projects = useQuery(() => projectsQueryOptions);
-
-  /// Whether the project has an icon lives on the project, not the document,
-  /// so the list is what answers it.
-  const hasProjectIcon = (slug: string) => {
-    const project = projects.data?.find(entry => entry.slug === slug);
-
-    return Boolean(project?.has_favicon_light ?? project?.has_favicon_dark);
-  };
 
   const [isShareOpen, setShareOpen] = createSignal(false);
   const [isSettingsOpen, setSettingsOpen] = createSignal(false);
@@ -114,11 +113,11 @@ const DocumentPage = () => {
   /// The worker renders in the background, so the button reports that the job
   /// was accepted rather than pretending the picture has already changed.
   const rerenderLabel = () => {
-    if (rerender.isPending) return "queueing";
+    if (rerender.isPending) return "Queueing...";
 
-    if (rerender.isError) return "could not queue";
+    if (rerender.isError) return "Could not queue";
 
-    return rerender.isSuccess ? "queued" : "re-render";
+    return rerender.isSuccess ? "Queued" : "Re-render";
   };
 
   const openSettings = (isOpen: boolean) => {
@@ -147,16 +146,17 @@ const DocumentPage = () => {
   };
 
   return (
-    <Suspense fallback={<p class="text-muted">Loading document.</p>}>
+    <Suspense fallback={<p class={STATUS}>Loading document...</p>}>
       <Show when={detail.data}>
         {document => (
           <div class="space-y-8">
             <header class="flex flex-wrap items-start gap-5">
-              <a href={document().url} class="group block h-40 w-64 shrink-0">
-                <Thumbnail
-                  slug={document().slug}
-                  class="size-full rounded border border-line"
-                />
+              <a
+                href={document().url}
+                class="group block h-40 w-64 shrink-0 overflow-hidden rounded-panel"
+                aria-label="Open the document"
+              >
+                <Thumbnail slug={document().slug} class="size-full" />
               </a>
 
               <div class="min-w-0 flex-1 space-y-2">
@@ -165,87 +165,64 @@ const DocumentPage = () => {
                     <Link
                       to="/projects/$project"
                       params={{ project: project() }}
-                      class="flex w-fit items-center gap-1.5 font-mono text-xs text-muted hover:text-accent"
+                      class="flex w-fit items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
                     >
-                      <ProjectFavicon
-                        project={project()}
-                        has={hasProjectIcon(project())}
-                        class="size-4"
-                      />
+                      <ProjectFavicon project={project()} class="size-4" />
                       {project()}
                     </Link>
                   )}
                 </Show>
 
-                <h1 class="text-xl font-semibold">{document().title ?? document().slug}</h1>
+                <h1 class="text-lg font-semibold">{document().title ?? document().slug}</h1>
 
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-xs text-muted">
-                  <span
-                    class={clsx(
-                      "rounded border px-1.5 py-0.5",
-                      document().published
-                        ? "border-accent/40 text-accent"
-                        : "border-line text-muted",
-                    )}
-                  >
-                    {document().published ? "published" : "private"}
+                <div class="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-xs text-slate-500">
+                  <span class="flex items-center gap-1.5">
+                    <Visibility published={document().published} />
+                    {document().published ? "Published" : "Private"}
                   </span>
-                  <span class="truncate">{document().slug}</span>
-                  <time datetime={document().created_at}>{document().created_at}</time>
+                  <span class="truncate font-mono">{document().slug}</span>
+                  <time datetime={document().created_at}>{absolute(document().created_at)}</time>
                   <For each={document().tags}>
-                    {(tag) => {
-                      const TagIcon = iconForTag(tag);
-
-                      return (
-                        <span class="flex items-center gap-1">
-                          <TagIcon class="text-sm" />
-                          {tag}
-                        </span>
-                      );
-                    }}
+                    {tag => <TagMark tag={tag} showLabel />}
                   </For>
                 </div>
               </div>
 
-              <div class="flex shrink-0 gap-2">
-                <Button variant="quiet" onClick={() => setShareOpen(true)}>
+              <div class="flex shrink-0 items-center gap-2">
+                <Button variant="secondary" onClick={() => setShareOpen(true)}>
                   Share
                 </Button>
-                <a
-                  href={document().url}
-                  class="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-contrast hover:opacity-90"
-                >
+                <a href={document().url} class={BUTTON_PRIMARY}>
                   Open
                 </a>
-                <Button
-                  variant="quiet"
+                <button
+                  type="button"
                   onClick={() => setSettingsOpen(true)}
                   title="Document settings"
                   aria-label="Document settings"
+                  class={GLYPH_RAISED}
                 >
-                  <TbOutlineSettings class="size-4" aria-hidden="true" />
-                </Button>
+                  <TbOutlineSettings size={16} aria-hidden="true" />
+                </button>
               </div>
             </header>
 
-            <section>
-              <h2 class="mb-2 font-mono text-xs tracking-wide text-muted uppercase">
-                Revisions
-              </h2>
-              <ol class="divide-y divide-line rounded-lg border border-line">
+            <section class="space-y-2">
+              <h2 class={SECTION_TITLE}>Revisions</h2>
+              <ol class={LIST}>
                 <For each={document().revisions.toReversed()}>
                   {(revision, index) => (
-                    <li class="flex items-center gap-4 px-3 py-2 font-mono text-xs">
-                      <span class="w-12 font-medium text-ink">
+                    <li class="flex items-center gap-4 px-5 py-3 text-sm">
+                      <span class="w-14 font-medium tabular-nums">
                         {`rev ${revision.revision}`}
                       </span>
-                      <span class="w-14 tracking-wide text-accent uppercase">
-                        {index() === 0 ? "current" : ""}
+                      <span class="w-16 text-xs text-emerald-700 dark:text-emerald-400">
+                        {index() === 0 ? "Current" : ""}
                       </span>
-                      <time datetime={revision.created_at} class="flex-1 text-muted">
-                        {revision.created_at}
+                      <time datetime={revision.created_at} class="flex-1 text-xs text-slate-500">
+                        {absolute(revision.created_at)}
                       </time>
-                      <span class="w-16 text-right text-muted">
+                      <span class="w-16 text-right text-xs text-slate-500 tabular-nums">
                         {formatSize(revision.size_bytes)}
                       </span>
                       <a
@@ -254,7 +231,7 @@ const DocumentPage = () => {
                             ? document().url
                             : `${document().url}/rev/${revision.revision}`
                         }
-                        class="text-accent hover:underline"
+                        class={LINK}
                       >
                         Open
                       </a>
@@ -262,7 +239,7 @@ const DocumentPage = () => {
                   )}
                 </For>
               </ol>
-              <p class="mt-2 text-xs text-muted">
+              <p class="text-xs text-slate-500">
                 Revision links are permanent and share the document password once
                 published.
               </p>
@@ -276,15 +253,15 @@ const DocumentPage = () => {
               <div class="space-y-5">
                 <SettingsSection title="Preview">
                   <div class="flex items-center gap-3">
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      class="shrink-0"
                       disabled={rerender.isPending}
                       onClick={() => rerender.mutate(document().slug)}
-                      class="shrink-0 rounded border border-line px-2 py-1 font-mono text-xs text-muted hover:border-accent hover:text-accent disabled:opacity-50"
                     >
                       {rerenderLabel()}
-                    </button>
-                    <p class="min-w-0 flex-1 text-xs text-muted">
+                    </Button>
+                    <p class="min-w-0 flex-1 text-xs text-slate-500">
                       The thumbnail is captured once, when the revision is pushed. One
                       taken by an older renderer stays wrong until it is asked for
                       again. Reload the page shortly after.
@@ -298,36 +275,36 @@ const DocumentPage = () => {
                       when={isConfirmingDelete()}
                       fallback={(
                         <>
-                          <button
-                            type="button"
+                          <Button
+                            variant="secondary"
+                            class="shrink-0"
                             onClick={() => setConfirmingDelete(true)}
-                            class="shrink-0 rounded border border-line px-2 py-1 font-mono text-xs text-muted hover:border-red-600 hover:text-red-600 dark:hover:border-red-400 dark:hover:text-red-400"
                           >
-                            delete
-                          </button>
-                          <p class="min-w-0 flex-1 text-xs text-muted">
+                            Delete
+                          </Button>
+                          <p class="min-w-0 flex-1 text-xs text-slate-500">
                             Every revision goes with it, including the links people
                             already hold. This cannot be undone.
                           </p>
                         </>
                       )}
                     >
-                      <button
-                        type="button"
+                      <Button
+                        variant="danger"
+                        class="shrink-0"
                         disabled={remove.isPending}
                         onClick={() => remove.mutate(document().slug)}
-                        class="shrink-0 rounded border border-red-600 px-2 py-1 font-mono text-xs text-red-700 disabled:opacity-50 dark:border-red-400 dark:text-red-400"
                       >
-                        {remove.isPending ? "deleting" : "delete for good"}
-                      </button>
-                      <button
-                        type="button"
+                        {remove.isPending ? "Deleting..." : "Delete for good"}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        class="shrink-0"
                         onClick={() => setConfirmingDelete(false)}
-                        class="shrink-0 rounded border border-line px-2 py-1 font-mono text-xs text-muted hover:border-accent hover:text-accent"
                       >
-                        cancel
-                      </button>
-                      <p class="min-w-0 flex-1 text-xs text-muted">
+                        Cancel
+                      </Button>
+                      <p class="min-w-0 flex-1 text-xs text-slate-500">
                         {document().revisions.length}
                         {document().revisions.length === 1 ? " revision" : " revisions"}
                         {" go. Anyone holding a link gets nothing."}
@@ -335,11 +312,7 @@ const DocumentPage = () => {
                     </Show>
                   </div>
                   <Show when={remove.error}>
-                    {error => (
-                      <p class="mt-1 text-xs text-red-600 dark:text-red-400">
-                        {error().message}
-                      </p>
-                    )}
+                    {error => <p class={ERROR} role="alert">{error().message}</p>}
                   </Show>
                 </SettingsSection>
               </div>
@@ -349,7 +322,7 @@ const DocumentPage = () => {
               <div class="space-y-4">
                 <CopyBlock text={document().url} />
 
-                <p class="text-sm text-muted">
+                <p class="text-sm text-slate-600 dark:text-slate-400">
                   {document().published
                     ? "Anyone with the link and the document password can read it. One password opens every revision, including future ones."
                     : "Only you can open it, signed in or with an API token. Publish it with a password to let anyone with the link read it."}
@@ -368,7 +341,7 @@ const DocumentPage = () => {
                       >
                         Unpublish
                       </Button>
-                      <Button variant="quiet" onClick={() => setRotating(true)}>
+                      <Button variant="secondary" onClick={() => setRotating(true)}>
                         Rotate password
                       </Button>
                     </div>
@@ -395,7 +368,7 @@ const DocumentPage = () => {
                         />
                       </div>
                       <Button
-                        variant="quiet"
+                        variant="secondary"
                         class="shrink-0"
                         onClick={() => setPassword(generatePassword())}
                       >
@@ -403,20 +376,16 @@ const DocumentPage = () => {
                       </Button>
                     </div>
                     <Show when={document().published}>
-                      <p class="text-xs text-muted">
+                      <p class="text-xs text-slate-500">
                         Rotating locks out everyone holding the old password.
                       </p>
                     </Show>
                     <Show when={publish.error}>
-                      {error => (
-                        <p class="text-sm text-red-700 dark:text-red-400">
-                          {error().message}
-                        </p>
-                      )}
+                      {error => <p class={ERROR} role="alert">{error().message}</p>}
                     </Show>
                     <div class="flex flex-wrap items-center justify-end gap-2">
                       <Button
-                        variant="quiet"
+                        variant="secondary"
                         class="mr-auto"
                         disabled={publish.isPending}
                         onClick={() => void shareInOneStep(document().slug)}
@@ -424,7 +393,7 @@ const DocumentPage = () => {
                         {justCopied() ? "Link copied" : "Generate and copy link"}
                       </Button>
                       <Show when={document().published}>
-                        <Button variant="quiet" onClick={() => setRotating(false)}>
+                        <Button variant="secondary" onClick={() => setRotating(false)}>
                           Cancel
                         </Button>
                       </Show>
@@ -439,12 +408,10 @@ const DocumentPage = () => {
                     server keeps a hash and cannot hand an old one back. */}
                 <Show when={document().published && shared()}>
                   {password => (
-                    <div class="space-y-2 border-t border-line pt-4">
-                      <h3 class="font-mono text-xs tracking-wide text-muted uppercase">
-                        Link with password
-                      </h3>
+                    <div class="space-y-2 border-t border-hairline pt-4">
+                      <h3 class={SECTION_TITLE}>Link with password</h3>
                       <CopyBlock text={linkWithPassword(document().url, password())} />
-                      <p class="text-xs text-muted">
+                      <p class="text-xs text-slate-500">
                         Opens without typing anything. The password rides in the
                         fragment, so it never reaches the server log, but anyone
                         holding the link is inside. It is shown until you leave
