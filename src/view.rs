@@ -165,6 +165,11 @@ async fn serve_asset(
         )
         .await;
     }
+    // the entry file is the document, and it answers only at the directory URL,
+    // where it carries the headers that keep other documents from framing it
+    if path == crate::api::upload::ENTRY_PATH {
+        return redirect_canonical(public_id, slug, revision);
+    }
     if !asked_for_by_its_own_document(req, public_id, slug) {
         return not_found();
     }
@@ -221,6 +226,13 @@ async fn serve_asset(
         .content_type(row.content_type)
         .header(header::CACHE_CONTROL, cache)
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        // the rule above trusts the Referer, and a document can rewrite its own
+        // address to any path on this origin with the History API before it
+        // asks. A frame or a window of a file here is one its script could
+        // read, so neither is allowed; an image drawn to a canvas still is,
+        // and only an origin per document closes that
+        .header(header::CONTENT_SECURITY_POLICY, "frame-ancestors 'none'")
+        .header("cross-origin-opener-policy", "noopener-allow-popups")
         // a stylesheet asks for its own fonts and images, and those requests
         // have to name it for the rule above to recognise them. Same-origin
         // keeps the address out of anything a document reaches off this site
@@ -229,18 +241,20 @@ async fn serve_asset(
 }
 
 /// Every document shares one origin, so the browser will hand one document's
-/// files to another document's scripts if we let it. This is where we do not.
+/// files to another document's scripts if we let it. This narrows that; it does
+/// not close it.
 ///
 /// A browser states what a request is for and what it came from in headers a
 /// page cannot set, `Sec-Fetch-Dest` and `Sec-Fetch-Site`, and for anything but
-/// a fetch it sets the `Referer` itself. Together they say whether a file is
-/// being loaded by the document it belongs to.
+/// a fetch it sets the `Referer` itself, from the page's current address. That
+/// address is the page's to rewrite: `history.replaceState` moves it to any
+/// path on this origin without a navigation. So a `Referer` inside the
+/// document's directory is necessary here but proves nothing, and the asset
+/// response carries its own refusal to be framed or opened.
 ///
-/// What this does not catch is a `fetch`, whose referrer the calling page may
-/// choose from anywhere on its own origin, and which is therefore refused
-/// outright; and a document another document opened in a window, which is a
-/// page rather than a file and never reaches here. Closing that last one takes
-/// an origin per document, not a rule.
+/// A `fetch` is refused outright, since the calling page may choose its
+/// referrer. Closing the rest, an image drawn to a canvas, takes an origin per
+/// document, not a rule.
 fn asked_for_by_its_own_document(req: &Request, public_id: &str, slug: &str) -> bool {
     let Some(dest) = req.header("sec-fetch-dest") else {
         // not a browser. An agent or a shell carries its own credential and has
@@ -373,7 +387,7 @@ async fn serve(
         return not_found();
     }
     let path = req.uri().path().to_string();
-    if let Some(response) = grant::redeem(req, secret, docs_url, &path) {
+    if let Some(response) = grant::redeem(req, secret, &path) {
         return response;
     }
 
@@ -974,28 +988,12 @@ fn answer_widget_fragment(
     )
 }
 
-/// The revision's HTML with no overlay, for the preview worker.
-///
-/// Guarded by the socket peer address rather than `RealIp`: a caller cannot
-/// make the kernel report a loopback peer, whereas `X-Forwarded-For` is theirs
-/// to write. The ingress connects from a pod address, so only a process inside
-/// this container reaches it.
-#[handler]
-pub async fn render_page(
-    req: &Request,
-    pool: Data<&SqlitePool>,
-    blobs: Data<&Option<crate::blobs::Blobs>>,
-    Path(revision_id): Path<i64>,
-) -> Response {
-    if !is_loopback(req) {
-        return not_found();
-    }
-    serve_revision_file(pool.0, blobs.0.as_ref(), revision_id, "index.html").await
-}
-
 /// The revision as the preview worker sees it: the entry document at the
 /// directory URL, and its assets beneath. An empty remainder means the entry,
 /// the same rule the public asset route uses.
+///
+/// Named by the worker's ticket rather than the revision id, so a document the
+/// worker is rendering cannot frame another revision into its own thumbnail.
 ///
 /// Guarded by the socket peer address rather than `RealIp`: a caller cannot
 /// make the kernel report a loopback peer, whereas `X-Forwarded-For` is theirs
@@ -1006,11 +1004,15 @@ pub async fn render_asset(
     req: &Request,
     pool: Data<&SqlitePool>,
     blobs: Data<&Option<crate::blobs::Blobs>>,
-    Path((revision_id, path)): Path<(i64, String)>,
+    tickets: Data<&crate::preview::Tickets>,
+    Path((token, path)): Path<(String, String)>,
 ) -> Response {
     if !is_loopback(req) {
         return not_found();
     }
+    let Some(revision_id) = tickets.revision(&token) else {
+        return not_found();
+    };
     let path = if path.is_empty() { "index.html" } else { &path };
     serve_revision_file(pool.0, blobs.0.as_ref(), revision_id, path).await
 }
@@ -1274,11 +1276,24 @@ Rotating the password locks out everyone who has the old one.</p>
         .body(html)
 }
 
+/// Every cookie by this name counts, not only the one a cookie jar would keep.
+/// The cookie is scoped to one document's path, so it cannot carry the
+/// `__Host-` prefix, and a document's script may set another by the same name
+/// for the parent domain, which a jar that keeps the last one would prefer.
+/// Such a cookie cannot carry a valid MAC, so it must not hide the one that
+/// does.
 fn has_valid_access_cookie(req: &Request, secret: &str, doc_id: i64, password_hash: &str) -> bool {
-    let Some(cookie) = req.cookie().get(DOC_ACCESS_COOKIE) else {
-        return false;
-    };
-    let value = cookie.value_str().to_string();
+    req.headers()
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .filter(|(name, _)| *name == DOC_ACCESS_COOKIE)
+        .any(|(_, value)| is_valid_access(value, secret, doc_id, password_hash))
+}
+
+fn is_valid_access(value: &str, secret: &str, doc_id: i64, password_hash: &str) -> bool {
     let Some((expiry, mac_hex)) = value.split_once('.') else {
         return false;
     };

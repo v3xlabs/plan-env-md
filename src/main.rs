@@ -33,7 +33,7 @@ fn app_routes() -> Route {
         .at("/share/:public_id/:slug", get(view::share_page))
         // the preview worker drives a browser at the loopback address, whose
         // Host is neither origin, so the render route answers on both
-        .at("/_render/:revision_id/*path", get(view::render_asset))
+        .at("/_render/:token/*path", get(view::render_asset))
         .at("/", get(static_files::index))
         .at("/*path", get(static_files::spa))
 }
@@ -56,7 +56,7 @@ fn docs_routes() -> Route {
         .at("/_planenv/:name", get(static_files::answer_asset))
         // one route, not a bare directory plus a wildcard: poem prefers the
         // wildcard, so the bare route would be dead and every render would 404
-        .at("/_render/:revision_id/*path", get(view::render_asset))
+        .at("/_render/:token/*path", get(view::render_asset))
         // registered after the specific routes above, which poem prefers
         .at(
             "/:public_id/:slug/rev/:revision/*path",
@@ -74,6 +74,7 @@ fn app(
     docs_url: config::DocsUrl,
     secret: config::Secret,
     blobs: Option<blobs::Blobs>,
+    tickets: preview::Tickets,
 ) -> impl poem::Endpoint {
     let docs_authority = docs_url.0.authority().to_string();
     Origins {
@@ -89,6 +90,7 @@ fn app(
     .data(secret)
     .data(blobs)
     .data(rate_limit::RateLimiter::default())
+    .data(tickets)
 }
 
 /// Which set of routes answers is decided by the host the reader asked for, so
@@ -171,7 +173,8 @@ async fn main() {
         .rsplit_once(':')
         .and_then(|(_, port)| port.parse().ok())
         .expect("BIND must end in :port");
-    preview::spawn(pool.clone(), port, blobs.clone());
+    let tickets = preview::Tickets::default();
+    preview::spawn(pool.clone(), port, blobs.clone(), tickets.clone());
     demote::spawn(pool.clone(), blobs.clone());
 
     tracing::info!(
@@ -187,6 +190,7 @@ async fn main() {
             config::DocsUrl(config.docs_url),
             config::Secret(config.secret),
             blobs,
+            tickets,
         ))
         .await
         .expect("server failed");

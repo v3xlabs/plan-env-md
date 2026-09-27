@@ -15,6 +15,16 @@ async fn test_app() -> impl Endpoint {
 async fn test_app_with_blobs(
     blobs: Option<crate::blobs::Blobs>,
 ) -> (impl Endpoint, sqlx::SqlitePool, Option<crate::blobs::Blobs>) {
+    let pool = memory_pool().await;
+    let app = app_on(
+        pool.clone(),
+        blobs.clone(),
+        crate::preview::Tickets::default(),
+    );
+    (app, pool, blobs)
+}
+
+async fn memory_pool() -> sqlx::SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -24,14 +34,22 @@ async fn test_app_with_blobs(
         .run(&pool)
         .await
         .expect("migrations");
-    let app = crate::app(
-        pool.clone(),
+    pool
+}
+
+fn app_on(
+    pool: sqlx::SqlitePool,
+    blobs: Option<crate::blobs::Blobs>,
+    tickets: crate::preview::Tickets,
+) -> impl Endpoint {
+    crate::app(
+        pool,
         crate::config::AppUrl(crate::config::Origin(APP_URL.to_string())),
         crate::config::DocsUrl(crate::config::Origin(DOCS_URL.to_string())),
         crate::config::Secret("test-secret".to_string()),
-        blobs.clone(),
-    );
-    (app, pool, blobs)
+        blobs,
+        tickets,
+    )
 }
 
 const APP_URL: &str = "http://app.test";
@@ -770,6 +788,13 @@ async fn public_view_password_gate_lifecycle() {
     assert!(text.contains("<h1>rev two</h1>"));
     assert!(text.contains("planenv-overlay"));
     assert!(!text.contains(">Share</a>"));
+
+    // a document's script can set a second cookie by this name for the parent
+    // domain, which the browser sends after this one and a cookie jar keeps in
+    // its place; it must not lock the visitor out
+    let tossed = format!("{access}; doc_access=0.00");
+    let response = call(&app, Method::GET, &doc_path, None, with_cookie(&tossed)).await;
+    assert_eq!(response.status(), StatusCode::OK);
 
     // the same cookie opens pinned revisions
     let response = call(
@@ -1743,6 +1768,81 @@ async fn a_documents_files_are_served_to_that_document_only() {
     );
 }
 
+/// A document can move its own address into another document's directory with
+/// `history.replaceState` before it asks, so a request that passes the rule
+/// above may still come from somebody else's script. What it gets must be
+/// something that script cannot frame, open, or read as the document.
+#[tokio::test]
+async fn a_file_that_passes_the_referer_rule_still_cannot_be_framed() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+    let pushed = push_files(
+        &app,
+        &token,
+        "mine",
+        &[("index.html", "<h1>mine</h1>"), ("notes.txt", "private")],
+    )
+    .await;
+    let id = json_body(pushed).await["id"].as_str().unwrap().to_string();
+    let reader = reader_cookie(&app, &cookie, &format!("/{id}/mine/")).await;
+    // the address another document's script moved itself to
+    let spoofed = format!("{DOCS_URL}/{id}/mine/anything");
+
+    let frame = |path: String| {
+        let app = &app;
+        let reader = reader.clone();
+        let spoofed = spoofed.clone();
+        async move {
+            let request = Request::builder()
+                .method(Method::GET)
+                .uri(path.parse().unwrap())
+                .header(header::HOST, "docs.test")
+                .header(header::COOKIE, reader)
+                .header("sec-fetch-dest", "iframe")
+                .header("sec-fetch-site", "same-origin")
+                .header(header::REFERER, spoofed)
+                .finish();
+            app.get_response(request).await
+        }
+    };
+
+    // the entry file is the document, which answers only at its directory URL
+    // and refuses to be framed there
+    for (path, location) in [
+        (format!("/{id}/mine/index.html"), format!("/{id}/mine/")),
+        (
+            format!("/{id}/mine/rev/1/index.html"),
+            format!("/{id}/mine/rev/1/"),
+        ),
+    ] {
+        let response = frame(path.clone()).await;
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT, "{path}");
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            location.as_str()
+        );
+    }
+
+    // any other file is served, and forbids the frame that would expose it
+    let response = frame(format!("/{id}/mine/notes.txt")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap(),
+        "frame-ancestors 'none'"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("cross-origin-opener-policy")
+            .unwrap(),
+        "noopener-allow-popups"
+    );
+}
+
 /// The two origins are the whole point: whatever a document's scripts can reach
 /// is what this test says they can reach.
 #[tokio::test]
@@ -2250,16 +2350,54 @@ async fn a_project_listing_is_scoped_and_capped() {
     assert_eq!(body[0]["slug"], json!("c"));
 }
 
+/// A document in the preview browser is its author's code inside the pod, and
+/// whatever it frames lands in its thumbnail. Only literal addresses and
+/// `localhost` here, so the test resolves nothing over the network.
+#[tokio::test]
+async fn the_preview_browser_reaches_its_own_render_and_public_hosts_only() {
+    use crate::preview::{Tickets, admits};
+
+    let tickets = Tickets::default();
+    let ticket = tickets.issue(7);
+    let own = format!("http://127.0.0.1:3000/_render/{}/style.css", ticket.token());
+    for url in [own.as_str(), "https://1.1.1.1/x.js", "data:text/plain,hi"] {
+        assert!(admits(url, 3000, &tickets).await, "{url}");
+    }
+
+    for url in [
+        "http://127.0.0.1:3000/_render/1/",
+        "http://127.0.0.1:3000/api/docs",
+        "http://localhost:3000/",
+        "http://10.0.0.5/",
+        "http://user@192.168.1.1:8080/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://100.64.0.1/",
+        "http://[::1]:3000/",
+        "http://[::ffff:a00:5]/",
+        "http://[64:ff9b::a00:5]/",
+        "http://[fd00::1]/",
+        "file:///etc/passwd",
+        "ws://1.1.1.1/",
+    ] {
+        assert!(!admits(url, 3000, &tickets).await, "{url}");
+    }
+
+    drop(ticket);
+    assert!(!admits(&own, 3000, &tickets).await);
+}
+
 /// The preview worker reaches the render route over a real loopback socket, so
 /// covering it needs a real socket: `RequestState` is private to poem, and an
 /// in-process request has no peer address to satisfy the guard with.
 #[tokio::test]
-async fn the_render_route_serves_the_entry_and_its_assets_over_loopback() {
+async fn the_render_route_serves_only_the_revision_being_rendered() {
     use std::io::{Read, Write};
 
-    let app = test_app().await;
+    let tickets = crate::preview::Tickets::default();
+    let app = app_on(memory_pool().await, None, tickets.clone());
     let cookie = session_cookie_of(&register(&app, "admin", None).await);
     let token = agent_token(&app, &cookie).await;
+    push(&app, &token, "secret", "<h1>not yours</h1>").await;
     push_files(
         &app,
         &token,
@@ -2284,8 +2422,8 @@ async fn the_render_route_serves_the_entry_and_its_assets_over_loopback() {
         let _ = poem::Server::new_with_acceptor(acceptor).run(app).await;
     });
 
-    let fetch = move |path: String| {
-        std::thread::spawn(move || {
+    let fetch = move |path: String| async move {
+        tokio::task::spawn_blocking(move || {
             let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
             write!(
                 stream,
@@ -2296,25 +2434,32 @@ async fn the_render_route_serves_the_entry_and_its_assets_over_loopback() {
             let _ = stream.read_to_string(&mut response);
             response
         })
-        .join()
-        .expect("request thread")
+        .await
+        .unwrap()
     };
 
-    // the first push is revision 1; an empty remainder must mean the entry
+    // the second push is revision 2; an empty remainder must mean the entry
     // document rather than a file with no name
-    let entry = tokio::task::spawn_blocking(move || fetch("/_render/1/".to_string()))
-        .await
-        .unwrap();
+    let ticket = tickets.issue(2);
+    let entry = fetch(format!("/_render/{}/", ticket.token())).await;
     assert!(entry.starts_with("HTTP/1.1 200 OK"), "entry: {entry}");
     assert!(entry.contains("<h1>entry</h1>"), "entry: {entry}");
     // and it carries no overlay, so a thumbnail shows the document alone
     assert!(!entry.contains("planenv-overlay"), "entry: {entry}");
 
-    let asset = tokio::task::spawn_blocking(move || fetch("/_render/1/style.css".to_string()))
-        .await
-        .unwrap();
+    let asset = fetch(format!("/_render/{}/style.css", ticket.token())).await;
     assert!(asset.starts_with("HTTP/1.1 200 OK"), "asset: {asset}");
     assert!(asset.contains("h1{color:red}"), "asset: {asset}");
+
+    // the document being rendered cannot name another revision
+    let other = fetch("/_render/1/".to_string()).await;
+    assert!(other.starts_with("HTTP/1.1 404"), "other: {other}");
+
+    // and a ticket is good for its render only
+    let used = format!("/_render/{}/", ticket.token());
+    drop(ticket);
+    let after = fetch(used).await;
+    assert!(after.starts_with("HTTP/1.1 404"), "after: {after}");
 }
 
 /// A refresh queues the render again but keeps the stored capture, so the

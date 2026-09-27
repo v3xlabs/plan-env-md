@@ -25,7 +25,11 @@ use crate::auth;
 use crate::config::{AppUrl, DocsUrl, Secret};
 use crate::view::{hex_encode, unix_now};
 
-const READER_COOKIE: &str = "doc_reader";
+/// The prefix holds a browser to one cookie by this name, path-wide and
+/// secure, on this host only. Without it a document's script could set a second
+/// one for the parent domain, which the browser sends too, and choose which
+/// account the reader reads as.
+const READER_COOKIE: &str = "__Host-doc_reader";
 /// A reader keeps a grant about as long as a working week, so opening a
 /// document does not bounce through the app every day.
 const READER_DAYS: i64 = 7;
@@ -97,7 +101,7 @@ fn is_document_path(next: &str) -> bool {
 /// The docs origin's half: turn a grant in the URL into a reader cookie, then
 /// send the reader to the address they asked for, so the grant stays out of the
 /// address bar, the history and any bookmark.
-pub fn redeem(req: &Request, secret: &Secret, docs_url: &DocsUrl, path: &str) -> Option<Response> {
+pub fn redeem(req: &Request, secret: &Secret, path: &str) -> Option<Response> {
     let grant = query_value(req.uri().query()?, "g")?;
     let user_id = verify(&secret.0, GRANT, &grant)?;
     let seconds = if user_id == ANONYMOUS {
@@ -110,7 +114,9 @@ pub fn redeem(req: &Request, secret: &Secret, docs_url: &DocsUrl, path: &str) ->
     cookie.set_path("/");
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Lax);
-    cookie.set_secure(docs_url.0.is_https());
+    // always, like the session: the prefix is only honoured on a secure cookie,
+    // and a browser counts loopback as secure
+    cookie.set_secure(true);
     cookie.set_max_age(std::time::Duration::from_secs(seconds as u64));
 
     Some(
