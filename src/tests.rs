@@ -777,12 +777,16 @@ async fn public_view_password_gate_lifecycle() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().get(header::SET_COOKIE).is_none());
 
-    // right password: redirect with access cookie; the document serves with
-    // the sandbox intact and the overlay carries no Share button for visitors
     let response = unlock(&app, &doc_path, "letmein").await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let access = access_cookie_of(&response);
-    let response = call(&app, Method::GET, &doc_path, None, with_cookie(&access)).await;
+    let landing = response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap()
+        .to_string();
+    let response = call(&app, Method::GET, &landing, None, with_cookie(&access)).await;
     assert_eq!(response.status(), StatusCode::OK);
     let text = response.into_body().into_string().await.unwrap();
     assert!(text.contains("<h1>rev two</h1>"));
@@ -1630,6 +1634,80 @@ async fn a_revision_serves_its_assets_beside_the_document() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_latest_asset_revalidates_against_its_revision() {
+    let app = test_app().await;
+    let cookie = session_cookie_of(&register(&app, "admin", None).await);
+    let token = agent_token(&app, &cookie).await;
+
+    let first = &[
+        ("index.html", "<h1>multi</h1>"),
+        ("style.css", "h1{color:red}"),
+    ];
+    let id = json_body(push_files(&app, &token, "multi", first).await).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reader = reader_cookie(&app, &cookie, &format!("/{id}/multi/")).await;
+    let path = format!("/{id}/multi/style.css");
+    let revalidate = |cookie: Option<&str>, tag: &str| {
+        let mut builder = Request::builder()
+            .uri(path.parse().unwrap())
+            .header(header::HOST, "docs.test")
+            .header(header::IF_NONE_MATCH, tag);
+        if let Some(cookie) = cookie {
+            builder = builder.header(header::COOKIE, cookie);
+        }
+        app.get_response(builder.finish())
+    };
+
+    let response = call(&app, Method::GET, &path, None, with_cookie(&reader)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "private, no-cache"
+    );
+    let tag = response
+        .headers()
+        .get(header::ETAG)
+        .expect("a latest asset carries a validator")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // a compressing proxy weakens the tag it forwards
+    for held in [tag.clone(), format!("W/{tag}")] {
+        let response = revalidate(Some(&reader), &held).await;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED, "{held}");
+        assert_eq!(response.headers().get(header::ETAG).unwrap(), tag.as_str());
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "private, no-cache"
+        );
+        assert!(response.into_body().into_bytes().await.unwrap().is_empty());
+    }
+
+    let response = revalidate(None, &tag).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(response.headers().get(header::ETAG).is_none());
+
+    let second = &[
+        ("index.html", "<h1>multi</h1>"),
+        ("style.css", "h1{color:blue}"),
+    ];
+    assert_eq!(
+        push_files(&app, &token, "multi", second).await.status(),
+        StatusCode::OK
+    );
+    let response = revalidate(Some(&reader), &tag).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_ne!(response.headers().get(header::ETAG).unwrap(), tag.as_str());
+    assert_eq!(
+        response.into_body().into_string().await.unwrap(),
+        "h1{color:blue}"
+    );
 }
 
 /// A shared cache in front of the service stores by URL and knows nothing of

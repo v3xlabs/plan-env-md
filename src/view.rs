@@ -1,8 +1,10 @@
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hmac::{Hmac, Mac};
 use poem::http::{StatusCode, header};
 use poem::web::cookie::{Cookie, SameSite};
+use poem::web::headers::{ETag, HeaderMapExt, IfNoneMatch};
 use poem::web::{Data, Form, Path, RealIp};
 use poem::{Request, Response, handler};
 use sha2::Sha256;
@@ -184,7 +186,7 @@ async fn serve_asset(
 
     let row = sqlx::query!(
         r#"SELECT f.content as "content: Vec<u8>", f.object_key as "object_key: String",
-                  f.content_type as "content_type!: String"
+                  f.content_type as "content_type!: String", r.revision as "revision!: i64"
            FROM revision_files f
            JOIN revisions r ON r.id = f.revision_id
            WHERE r.document_id = ? AND f.path = ?
@@ -203,6 +205,23 @@ async fn serve_asset(
     let Some(row) = row else {
         return not_found();
     };
+    let cache = if revision.is_some() {
+        "private, max-age=31536000, immutable"
+    } else {
+        "private, no-cache"
+    };
+    let etag = ETag::from_str(&format!("\"{}\"", row.revision))
+        .expect("a quoted integer is an entity tag");
+    let unchanged = req
+        .headers()
+        .typed_get::<IfNoneMatch>()
+        .is_some_and(|condition| !condition.precondition_passes(&etag));
+    let response = Response::builder()
+        .header(header::CACHE_CONTROL, cache)
+        .typed_header(etag);
+    if unchanged {
+        return response.status(StatusCode::NOT_MODIFIED).finish();
+    }
     // the row exists, so a body that will not load is a fault on our side. It
     // must not answer 404: that is the reply for a document the caller may not
     // see, and reusing it here would hide a broken asset as a missing one
@@ -216,15 +235,8 @@ async fn serve_asset(
                 .finish();
         }
     };
-    // a pinned revision never changes; the latest pointer does
-    let cache = if revision.is_some() {
-        "private, max-age=31536000, immutable"
-    } else {
-        "no-cache"
-    };
-    Response::builder()
+    response
         .content_type(row.content_type)
-        .header(header::CACHE_CONTROL, cache)
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         // the rule above trusts the Referer, and a document can rewrite its own
         // address to any path on this origin with the History API before it
@@ -366,7 +378,7 @@ async fn do_unlock(
 
     Response::builder()
         .status(StatusCode::SEE_OTHER)
-        .header(header::LOCATION, format!("/{public_id}/{slug}"))
+        .header(header::LOCATION, format!("/{public_id}/{slug}/"))
         .header(header::SET_COOKIE, cookie.to_string())
         .finish()
 }
@@ -678,9 +690,9 @@ fn chrome_fragments(
         .iter()
         .map(|r| {
             let href = if *r == latest {
-                format!("/{public_id}/{slug}")
+                format!("/{public_id}/{slug}/")
             } else {
-                format!("/{public_id}/{slug}/rev/{r}")
+                format!("/{public_id}/{slug}/rev/{r}/")
             };
             let marker = if *r == latest { " (current)" } else { "" };
             let viewing = if *r == current {
