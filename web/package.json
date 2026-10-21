@@ -27,7 +27,7 @@
         "openapi-typescript": "^7.13.0",
         "tailwindcss": "^4.3.3",
         "typescript": "^5.9.3",
-        "vite": "^8.2.1",
+        "vite": "^8.2.4",
         "vite-plugin-solid": "^2.11.14"
     }
 }
